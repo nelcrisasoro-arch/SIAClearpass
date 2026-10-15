@@ -1,0 +1,6 @@
+{
+  "name": "SIA ClearPass - Student Clearance Mobile App",
+  "description": "Official student clearance mobile application and administrative portal for St. Isidore Academy of Trinidad Bohol, Inc. Featuring real-time requirement submissions, digital signatures, status tracking, and automated clearance certificate generation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

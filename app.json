@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "SIA ClearPass",
+    "slug": "sia-clearpass",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./src/assets/images/sia_school_crest_1790959872395.jpg",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#1e3a8a",
+      "resizeMode": "contain"
+    },
+    "android": {
+      "package": "com.sia.clearpass",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#1e3a8a"
+      },
+      "permissions": [
+        "INTERNET",
+        "ACCESS_NETWORK_STATE"
+      ]
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.sia.clearpass"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "9420fa8e-80aa-44ee-b02e-921425c3a069"
+      }
+    }
+  }
+}
