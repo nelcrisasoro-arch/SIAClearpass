@@ -29,7 +29,7 @@ import {
   INITIAL_DIGITAL_SIGNATURES,
   INITIAL_NOTIFICATIONS,
 } from '../data/initialData';
-import { apiUrl } from '../utils/api';
+import { apiFetch, apiUrl, realtimeUrl } from '../utils/api';
 
 export type DeviceMode = 'mobile' | 'responsive' | 'admin_web';
 
@@ -239,12 +239,19 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     notifications,
   });
 
+  const [currentRole, setCurrentRole] = useState<UserRole>('Administrator');
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+
   useEffect(() => {
+    if (!currentUser) {
+      setServerStateLoaded(false);
+      return;
+    }
     let active = true;
 
     const loadSharedState = async () => {
       try {
-        const response = await fetch(apiUrl('/api/state'));
+        const response = await apiFetch('/api/state');
         const result = await response.json();
         if (!response.ok || !result.success) {
           throw new Error(result.message || `Database sync failed (${response.status}).`);
@@ -286,7 +293,7 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     let refreshTimer: ReturnType<typeof setInterval> | undefined;
     let eventSource: EventSource | undefined;
     if (typeof EventSource !== 'undefined') {
-      eventSource = new EventSource(apiUrl('/api/realtime/stream'));
+      eventSource = new EventSource(realtimeUrl());
       eventSource.onmessage = (message) => {
         try {
           const event = JSON.parse(message.data);
@@ -311,11 +318,9 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       eventSource?.close();
       if (refreshTimer) clearInterval(refreshTimer);
     };
-  }, []);
+  }, [currentUser]);
 
   // Current session
-  const [currentRole, setCurrentRole] = useState<UserRole>('Administrator');
-  const [currentUser, setCurrentUser] = useState<User | null>(() => users.find(u => u.role === 'Administrator') || null);
   const [deviceMode, setDeviceMode] = useState<DeviceMode>('mobile');
   const [isPhoneLocked, setIsPhoneLocked] = useState(false);
   const [headsUpNotification, setHeadsUpNotification] = useState<NotificationItem | null>(null);
@@ -437,14 +442,14 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, [users, students, personnel, clearanceForms, clearancePeriods, signatories, requirements, assignments, submissions, records, signatures, notifications]);
 
   useEffect(() => {
-    if (!serverStateLoaded) return;
+    if (!currentUser || !serverStateLoaded) return;
     const state = getDataSnapshot();
     const serializedState = JSON.stringify(state);
     if (serializedState === lastSyncedState.current) return;
 
     const timeout = setTimeout(async () => {
       try {
-        const response = await fetch(apiUrl('/api/state'), {
+        const response = await apiFetch('/api/state', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ state, source: syncClientId.current }),
@@ -463,7 +468,7 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }, 250);
 
     return () => clearTimeout(timeout);
-  }, [serverStateLoaded, users, students, personnel, clearanceForms, clearancePeriods, signatories, requirements, assignments, submissions, records, signatures, notifications]);
+  }, [currentUser, serverStateLoaded, users, students, personnel, clearanceForms, clearancePeriods, signatories, requirements, assignments, submissions, records, signatures, notifications]);
 
   // Derived active items
   const activePeriod = clearancePeriods.find(p => p.status === 'Ongoing') || clearancePeriods[0] || null;
@@ -592,7 +597,7 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const response = await fetch(apiUrl('/api/auth/login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password, expectedRole }),
       });
       const result = await response.json();
       if (!response.ok || !result.success) {
@@ -601,6 +606,8 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (expectedRole && result.role !== expectedRole) {
         return { success: false, message: 'Invalid login credentials for the selected role.' };
       }
+
+      if (result.sessionToken) localStorage.setItem('sia_clearpass_session', result.sessionToken);
 
       const now = new Date().toISOString();
       const authenticatedUser: User = {
@@ -673,6 +680,8 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const logout = () => {
+    void apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => undefined);
+    localStorage.removeItem('sia_clearpass_session');
     setCurrentUser(null);
   };
 
@@ -1258,7 +1267,7 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       throw new Error('Administrator accounts cannot be deleted.');
     }
 
-    const response = await fetch(apiUrl(`/api/users/${encodeURIComponent(userId)}`), {
+    const response = await apiFetch(`/api/users/${encodeURIComponent(userId)}`, {
       method: 'DELETE',
     });
     const result = await response.json();
@@ -1277,7 +1286,7 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const updateAdminStudent = async (student_id: string, updates: Partial<StudentProfile>) => {
-    const response = await fetch(apiUrl(`/api/students/${encodeURIComponent(student_id)}`), {
+      const response = await apiFetch(`/api/students/${encodeURIComponent(student_id)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updates),
@@ -1300,7 +1309,7 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const updateAdminPersonnel = async (personnel_id: string, updates: Partial<PersonnelProfile>) => {
-    const response = await fetch(apiUrl(`/api/personnel/${encodeURIComponent(personnel_id)}`), {
+      const response = await apiFetch(`/api/personnel/${encodeURIComponent(personnel_id)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updates),

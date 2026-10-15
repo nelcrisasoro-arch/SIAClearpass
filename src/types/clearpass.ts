@@ -19,6 +19,7 @@ export interface StudentProfile {
   first_name: string;
   middle_name: string;
   last_name: string;
+  suffix?: string;
   grade_level: string; // e.g. "Grade 9"
   section: string; // e.g. "Rose"
   school_level: string; // e.g. "Junior High School"

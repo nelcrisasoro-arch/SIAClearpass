@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import { UserRole, StudentProfile, PersonnelProfile } from '../../types/clearpass';
 import { ClearanceCertificateModal } from '../common/ClearanceCertificateModal';
-import { apiUrl } from '../../utils/api';
+import { apiFetch } from '../../utils/api';
 import { SchoolLogo } from '../common/SchoolLogo';
 
 export const AdminPortal: React.FC = () => {
@@ -42,6 +42,7 @@ export const AdminPortal: React.FC = () => {
     activeForm,
     currentRole,
     currentUser,
+    authenticateUser,
     setDeviceMode,
     switchRole,
     addUser,
@@ -136,16 +137,14 @@ export const AdminPortal: React.FC = () => {
   );
 
   // Handle Admin Login (Figure 29)
-  const handleAdminLogin = (e: React.FormEvent) => {
+  const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const user = adminUsername.trim().toLowerCase();
-    const pass = adminPassword.trim();
-    if (user === 'admin' && (pass === 'admin123' || pass === 'adminpassword123' || pass === 'password123')) {
-      switchRole('Administrator');
+    const result = await authenticateUser(adminUsername.trim(), adminPassword, 'Administrator');
+    if (result.success) {
       setIsAdminLoggedIn(true);
       setLoginError('');
     } else {
-      setLoginError('Invalid Administrator credentials. (Username: admin | Password: admin123)');
+      setLoginError(result.message || 'Invalid Administrator credentials.');
     }
   };
 
@@ -188,12 +187,16 @@ export const AdminPortal: React.FC = () => {
     }
 
     const finalUsername = pUsername.trim() || `${pFirstName.trim().toLowerCase()}.${pLastName.trim().toLowerCase()}`.replace(/\s+/g, '');
-    const teacherPass = pPassword.trim() || 'teacher123';
+    const teacherPass = pPassword.trim();
+    if (teacherPass.length < 12) {
+      setDeleteError('Set a temporary password with at least 12 characters.');
+      return;
+    }
 
     const userId = `usr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const personnelId = `per_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     try {
-      const response = await fetch(apiUrl('/api/personnel'), {
+      const response = await apiFetch('/api/personnel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -334,12 +337,16 @@ export const AdminPortal: React.FC = () => {
 
     const finalUsername = sUsername.trim() || `${sFirstName.trim().toLowerCase()}.${sLastName.trim().toLowerCase()}`.replace(/\s+/g, '');
     const fullName = `${sLastName}, ${sFirstName} ${sMiddleName} ${sSuffix}`.trim();
-    const studentPass = sPassword.trim() || (lrnNo.length >= 4 ? lrnNo.slice(-4) : '1234');
+    const studentPass = sPassword.trim();
+    if (studentPass.length < 12) {
+      setDeleteError('Set a temporary password with at least 12 characters.');
+      return;
+    }
 
     const userId = `usr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const studentId = `std_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     try {
-      const response = await fetch(apiUrl('/api/students'), {
+      const response = await apiFetch('/api/students', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -485,17 +492,6 @@ export const AdminPortal: React.FC = () => {
               Sign In to Administrator Dashboard
             </button>
 
-            {/* Quick Demo Fill Helper */}
-            <button
-              type="button"
-              onClick={() => {
-                setAdminUsername('admin');
-                setAdminPassword('admin123');
-              }}
-              className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-[11px] font-medium transition-colors cursor-pointer border border-slate-200"
-            >
-              Auto-Fill Credentials (admin / admin123)
-            </button>
           </form>
 
           <div className="mt-6 pt-4 border-t border-slate-200 text-center text-[11px] text-slate-400">
@@ -1657,7 +1653,7 @@ export const AdminPortal: React.FC = () => {
                     setPLastName('Asoro');
                     setPEmployeeNo(String(rnd));
                     setPUsername(`nelcris.teacher${rnd}`);
-                    setPPassword('teacher123');
+                    setPPassword(`Teach${rnd}!SIA2026`);
                   }}
                   className="w-1/3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold text-xs cursor-pointer border border-slate-300"
                 >
@@ -1757,7 +1753,7 @@ export const AdminPortal: React.FC = () => {
                     const val = e.target.value;
                     setSLrn(val);
                     if (val.length >= 4 && !editingStudentId) {
-                      setSPassword(val.slice(-4));
+                      setSPassword(`Student${val.slice(-4)}!SIA`);
                     }
                   }}
                   className="w-full p-2 bg-slate-50 border border-slate-300 rounded-lg font-mono"
@@ -1870,7 +1866,7 @@ export const AdminPortal: React.FC = () => {
                     setSLastName('DelaCruz');
                     setSLrn(`11794710${rnd}`);
                     setSUsername(`juan.delacruz${rnd}`);
-                    setSPassword(`${rnd}`);
+                    setSPassword(`Student${rnd}!SIA`);
                   }}
                   className="w-1/3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold text-xs cursor-pointer border border-slate-300 transition-colors"
                 >

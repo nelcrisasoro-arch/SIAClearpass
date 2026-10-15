@@ -44,7 +44,7 @@ export const StudentHomeScreenRN: React.FC<Props> = ({
     <View style={styles.container}>
       {/* Top Header Bar (Figure 20) */}
       <View style={styles.topBar}>
-        <Image source={schoolLogoUrl} style={styles.siaLogo} />
+        <Image source={{ uri: schoolLogoUrl }} style={styles.siaLogo} />
 
         <View style={styles.topRightIcons}>
           {/* Notification Bell */}

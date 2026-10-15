@@ -44,7 +44,7 @@ export const PersonnelHomeScreenRN: React.FC<Props> = ({ onNavigateTab }) => {
     <View style={styles.container}>
       {/* Top Header Bar (Figure 24) */}
       <View style={styles.topBar}>
-        <Image source={schoolLogoUrl} style={styles.siaLogo} />
+        <Image source={{ uri: schoolLogoUrl }} style={styles.siaLogo} />
 
         <View style={styles.topRightIcons}>
           <TouchableOpacity

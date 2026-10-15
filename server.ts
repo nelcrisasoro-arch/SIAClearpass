@@ -1,14 +1,51 @@
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { timingSafeEqual } from 'node:crypto';
 import { getDbPool, testDbConnection, isDbConnected } from './src/server/db';
+import { createSession, getSession, hashPassword, revokeSession, verifyPassword } from './src/server/security';
 
 dotenv.config();
 
 const app = express();
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (process.env.NODE_ENV === 'production') res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  next();
+});
 const PORT = Number(process.env.PORT) || 3000;
 const stateTable = 'clearpass_app_state';
 let stateTableSetup: Promise<void> | null = null;
+
+const ensureBootstrapAdmin = async () => {
+  const username = process.env.ADMIN_USERNAME?.trim();
+  const password = process.env.ADMIN_PASSWORD;
+  const email = process.env.ADMIN_EMAIL?.trim() || 'admin@sia.edu.ph';
+  if (!username || !password || password.length < 14) {
+    throw new Error('Set ADMIN_USERNAME and ADMIN_PASSWORD (at least 14 characters) in the hosting secrets before starting.');
+  }
+  const pool = getDbPool();
+  if (!pool || !isDbConnected()) throw new Error('MySQL is required in production.');
+  await pool.query(`CREATE TABLE IF NOT EXISTS users (
+    user_id VARCHAR(64) PRIMARY KEY, username VARCHAR(100) NOT NULL UNIQUE,
+    email VARCHAR(150) NOT NULL UNIQUE, password_hash VARCHAR(255) NOT NULL,
+    role VARCHAR(30) NOT NULL, name VARCHAR(150) NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  )`);
+  const [rows]: any = await pool.query('SELECT user_id FROM users WHERE role = \'Administrator\' LIMIT 1');
+  if (rows.length) return;
+  await pool.query(
+    'INSERT INTO users (user_id, username, email, password_hash, role, name) VALUES (?, ?, ?, ?, \'Administrator\', ?)',
+    ['usr_admin', username, email, await hashPassword(password), 'SIA ClearPass Administrator']
+  );
+};
 
 const ensureStateTable = async () => {
   const pool = getDbPool();
@@ -32,21 +69,44 @@ const ensureStateTable = async () => {
   return pool;
 };
 
-// Enable CORS for all mobile devices, web origins, and local testing
+const allowedOrigins = new Set((process.env.CORS_ORIGINS || 'http://localhost:3000,http://127.0.0.1:3000')
+  .split(',').map((origin) => origin.trim()).filter(Boolean));
 app.use(cors({
-  origin: '*',
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.has(origin) || /^https:\/\/[a-z0-9-]+\.onrender\.com$/i.test(origin)) return callback(null, true);
+    return callback(new Error('Origin is not allowed by CORS.'));
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
-app.use(express.json({ limit: '15mb' }));
-app.use(express.urlencoded({ extended: true, limit: '15mb' }));
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+type AuthRequest = Request & { identity?: { userId: string; role: string } };
+const loginAttempts = new Map<string, { count: number; resetAt: number }>;
+app.use('/api', (req: AuthRequest, res: Response, next) => {
+  if (req.path === '/health' || req.path === '/auth/login') return next();
+  const bearer = req.header('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1];
+  const token = bearer || (req.path === '/realtime/stream' ? String(req.query.ticket || '') : '');
+  const identity = getSession(token);
+  if (!identity) return res.status(401).json({ success: false, message: 'Please sign in to continue.' });
+  const adminRoutes = ['/students', '/personnel', '/users'];
+  if (adminRoutes.some((route) => req.path === route || req.path.startsWith(`${route}/`)) && identity.role !== 'Administrator') {
+    return res.status(403).json({ success: false, message: 'Administrator access is required.' });
+  }
+  if ((req.path === '/clearance/sign' || req.path === '/clearance/undo') && identity.role !== 'Personnel') {
+    return res.status(403).json({ success: false, message: 'Personnel access is required for clearance signatures.' });
+  }
+  req.identity = identity;
+  return next();
+});
 
 // =========================================================================
 // REAL-TIME EVENT STREAM (Server-Sent Events / SSE)
 // Connects Android APKs and Admin Web for Instant Multi-Device Sync!
 // =========================================================================
-const sseClients = new Set<Response>();
+const sseClients = new Map<Response, { userId: string; role: string }>();
 
 const broadcastRealtimeEvent = (event: {
   type:
@@ -62,10 +122,11 @@ const broadcastRealtimeEvent = (event: {
     | string;
   data: any;
 }) => {
-  const payload = `data: ${JSON.stringify({ ...event, timestamp: new Date().toISOString() })}\n\n`;
-  sseClients.forEach((client) => {
+  sseClients.forEach((identity, client) => {
+    if ((event.type === 'STUDENT_CREATED' || event.type === 'PERSONNEL_CREATED' || event.type === 'USER_DELETED')
+      && identity.role !== 'Administrator') return;
     try {
-      client.write(payload);
+      client.write(`data: ${JSON.stringify({ ...event, timestamp: new Date().toISOString() })}\n\n`);
     } catch {
       sseClients.delete(client);
     }
@@ -78,11 +139,12 @@ app.get('/api/realtime/stream', (req: Request, res: Response) => {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
-    'Access-Control-Allow-Origin': '*',
   });
 
   res.write(`data: ${JSON.stringify({ type: 'CONNECTED', message: 'Real-time sync established with SIA ClearPass Server' })}\n\n`);
-  sseClients.add(res);
+  const identity = (req as AuthRequest).identity;
+  if (!identity) return res.end();
+  sseClients.set(res, identity);
 
   req.on('close', () => {
     sseClients.delete(res);
@@ -116,7 +178,18 @@ app.get('/api/state', async (_req: Request, res: Response) => {
     const [rows]: any = await pool.query(
       `SELECT state_json, updated_at FROM ${stateTable} WHERE state_key = 'main' LIMIT 1`
     );
-    const state = rows[0] ? JSON.parse(rows[0].state_json) : null;
+    let state = rows[0] ? JSON.parse(rows[0].state_json) : null;
+    if (!state) {
+      const [admins]: any = await pool.query(
+        `SELECT user_id, username, email, name, role, is_active AS status, created_at, updated_at
+         FROM users WHERE role = 'Administrator' AND is_active = TRUE ORDER BY created_at ASC LIMIT 1`
+      );
+      state = {
+        users: admins.map((user: any) => ({ ...user, auth_user_id: `auth_${user.user_id}` })),
+        students: [], personnel: [], clearanceForms: [], clearancePeriods: [], signatories: [],
+        requirements: [], assignments: [], submissions: [], records: [], signatures: [], notifications: [],
+      };
+    }
     return res.json({ success: true, state, updated_at: rows[0]?.updated_at ?? null });
   } catch (err: any) {
     console.error('[MySQL GET /api/state error]:', err?.message || err);
@@ -156,7 +229,13 @@ app.put('/api/state', async (req: Request, res: Response) => {
 app.post('/api/auth/login', async (req: Request, res: Response) => {
   const { username, password } = req.body;
   const term = String(username || '').trim().toLowerCase();
-  const pass = String(password || '').trim();
+  const pass = typeof password === 'string' ? password : '';
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const nowMs = Date.now();
+  const attempts = loginAttempts.get(ip);
+  if (attempts && attempts.resetAt > nowMs && attempts.count >= 10) {
+    return res.status(429).json({ success: false, message: 'Too many login attempts. Please wait 15 minutes.' });
+  }
 
   // Try checking in MySQL first if available
   const pool = getDbPool();
@@ -175,10 +254,23 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
 
       if (rows && rows.length > 0) {
         const found = rows[0];
-        // Allow password match or simple default check
-        if (found.password_hash === pass) {
+        if (req.body?.expectedRole && found.role !== req.body.expectedRole) {
+          return res.status(401).json({ success: false, message: 'Invalid login credentials for the selected role.' });
+        }
+        const storedHash = String(found.password_hash || '');
+        const isHashed = storedHash.startsWith('scrypt$');
+        const validPassword = isHashed
+          ? await verifyPassword(pass, storedHash)
+          : pass.length > 0 && storedHash.length === pass.length && timingSafeEqual(Buffer.from(storedHash), Buffer.from(pass));
+        if (validPassword && found.is_active !== false && found.is_active !== 0) {
+          if (!isHashed) {
+            await pool.query('UPDATE users SET password_hash = ? WHERE user_id = ?', [await hashPassword(pass), found.user_id]);
+          }
+          loginAttempts.delete(ip);
+          const sessionToken = createSession(String(found.user_id), String(found.role));
           return res.json({
             success: true,
+            sessionToken,
             role: found.role,
             user: {
               user_id: found.user_id,
@@ -226,28 +318,25 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
         }
       }
     } catch (err) {
-      console.warn('[MySQL Auth Query Warning]:', err);
+      console.error('[Auth] Login service error:', err instanceof Error ? err.message : 'unknown');
     }
   }
 
-  // Fallback credentials
-  if (term === 'admin' && (pass === 'admin123' || pass === 'adminpassword123')) {
-    return res.json({
-      success: true,
-      role: 'Administrator',
-      user: {
-        user_id: 'usr_admin',
-        username: 'admin',
-        name: 'ClearPass System Administrator',
-        role: 'Administrator',
-      },
-    });
-  }
+  const current = loginAttempts.get(ip);
+  loginAttempts.set(ip, current && current.resetAt > nowMs
+    ? { count: current.count + 1, resetAt: current.resetAt }
+    : { count: 1, resetAt: nowMs + 15 * 60 * 1000 });
 
   return res.status(401).json({
     success: false,
     message: 'Invalid credentials. Please verify your username and password.',
   });
+});
+
+app.post('/api/auth/logout', (req: Request, res: Response) => {
+  const token = req.header('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1];
+  revokeSession(token);
+  return res.json({ success: true });
 });
 
 // =========================================================================
@@ -277,7 +366,6 @@ app.get('/api/students', async (_req: Request, res: Response) => {
 
 // Create/Enroll Student in MySQL (Called by Administrator Web Portal)
 app.post('/api/students', async (req: Request, res: Response) => {
-  console.log('📥 [API] POST /api/students received! Body:', req.body);
 
   const lrn = String(req.body.student_number || req.body.studentNumber || req.body.lrn || '').trim();
   const fName = String(req.body.first_name || req.body.firstName || '').trim();
@@ -290,10 +378,11 @@ app.post('/api/students', async (req: Request, res: Response) => {
   const sYear = String(req.body.school_year || req.body.schoolYear || '2026-2027');
   let uName = String(req.body.username || '').trim() || `${fName.toLowerCase()}.${lName.toLowerCase()}`.replace(/\s+/g, '');
   let uEmail = String(req.body.email || '').trim() || `${uName}_${Date.now().toString().slice(-4)}@sia.edu.ph`;
-  const pass = String(req.body.password || '').trim() || (lrn.length >= 4 ? lrn.slice(-4) : '1234');
+  const pass = String(req.body.password || '');
+  if (pass.length < 12) return res.status(400).json({ success: false, error: 'Set a temporary password with at least 12 characters.' });
+  const passwordHash = await hashPassword(pass);
 
   if (!fName || !lName || !lrn) {
-    console.warn('⚠️ [API] Missing required fields: first_name, last_name, or student_number');
     return res.status(400).json({ error: 'First name, last name, and LRN/Student number are required.' });
   }
 
@@ -327,14 +416,14 @@ app.post('/api/students', async (req: Request, res: Response) => {
         await pool.query(
           `INSERT INTO users (user_id, username, email, password_hash, role, name)
              VALUES (?, ?, ?, ?, 'Student', ?)`,
-          [finalUserId, uName, uEmail, pass, fullName]
+          [finalUserId, uName, uEmail, passwordHash, fullName]
         );
       } else {
         // If already an existing student, use their existing user_id
         finalUserId = existing.user_id;
         await pool.query(
           `UPDATE users SET name = ?, password_hash = ? WHERE user_id = ?`,
-          [fullName, pass, finalUserId]
+          [fullName, passwordHash, finalUserId]
         );
       }
     } else {
@@ -342,7 +431,7 @@ app.post('/api/students', async (req: Request, res: Response) => {
       await pool.query(
         `INSERT INTO users (user_id, username, email, password_hash, role, name)
          VALUES (?, ?, ?, ?, 'Student', ?)`,
-        [finalUserId, uName, uEmail, pass, fullName]
+        [finalUserId, uName, uEmail, passwordHash, fullName]
       );
     }
 
@@ -371,8 +460,8 @@ app.post('/api/students', async (req: Request, res: Response) => {
     mysqlInserted = true;
     console.log(`✅ [MySQL] Successfully inserted student "${fullName}" (LRN: ${lrn}, Username: "${uName}") into database!`);
   } catch (err: any) {
-    console.error('❌ [MySQL Student Insert Error]:', err?.message || err);
-    return res.status(500).json({ error: 'Failed to insert student into MySQL database: ' + err?.message });
+    console.error('[MySQL] Student create failed:', err instanceof Error ? err.message : 'unknown error');
+    return res.status(500).json({ error: 'Failed to create student account.' });
   }
 
   const createdStudent = {
@@ -572,7 +661,6 @@ app.get('/api/personnel', async (_req: Request, res: Response) => {
 
 // Create/Provision Personnel in MySQL
 app.post('/api/personnel', async (req: Request, res: Response) => {
-  console.log('📥 [API] POST /api/personnel received! Body:', req.body);
 
   const empNo = String(req.body.employee_number || req.body.employeeNumber || '').trim();
   const fName = String(req.body.full_name || req.body.fullName || req.body.name || '').trim();
@@ -583,10 +671,11 @@ app.post('/api/personnel', async (req: Request, res: Response) => {
   const sect = String(req.body.assigned_section || req.body.assignedSection || 'All Sections').trim();
   let uName = String(req.body.username || '').trim() || fName.toLowerCase().replace(/\s+/g, '.');
   let uEmail = String(req.body.email || '').trim() || `${uName}@sia.edu.ph`;
-  const pass = String(req.body.password || '').trim() || 'teacher123';
+  const pass = String(req.body.password || '');
+  if (pass.length < 12) return res.status(400).json({ success: false, error: 'Set a temporary password with at least 12 characters.' });
+  const passwordHash = await hashPassword(pass);
 
   if (!fName || !empNo) {
-    console.warn('⚠️ [API] Missing required fields for personnel');
     return res.status(400).json({ error: 'Full name and employee number are required.' });
   }
 
@@ -626,13 +715,13 @@ app.post('/api/personnel', async (req: Request, res: Response) => {
       uEmail = existingUser.email;
       await connection.query(
         'UPDATE users SET name = ?, password_hash = ? WHERE user_id = ?',
-        [fName, pass, userId]
+        [fName, passwordHash, userId]
       );
     } else {
       await connection.query(
         `INSERT INTO users (user_id, username, email, password_hash, role, name)
          VALUES (?, ?, ?, ?, 'Personnel', ?)`,
-        [userId, uName, uEmail, pass, fName]
+        [userId, uName, uEmail, passwordHash, fName]
       );
     }
 
@@ -644,7 +733,7 @@ app.post('/api/personnel', async (req: Request, res: Response) => {
       await connection.query(
         `INSERT INTO users (user_id, username, email, password_hash, role, name)
          VALUES (?, ?, ?, ?, 'Personnel', ?)`,
-        [userId, uName, uEmail, pass, fName]
+        [userId, uName, uEmail, passwordHash, fName]
       );
       [userRows] = await connection.query(
         'SELECT user_id, role FROM users WHERE user_id = ? FOR UPDATE',
@@ -708,7 +797,7 @@ app.post('/api/personnel', async (req: Request, res: Response) => {
     });
     return res.status(500).json({
       success: false,
-      error: `Failed to save personnel account${err?.message ? `: ${err.message}` : '.'}`,
+      error: 'Failed to save personnel account.',
     });
   } finally {
     connection.release();
@@ -802,16 +891,22 @@ app.post('/api/clearance/sign', async (req: Request, res: Response) => {
   }
 
   const pool = getDbPool();
-  if (pool && isDbConnected()) {
-    try {
-      await pool.query(
-        `UPDATE clearance_assignments SET status = 'Approved', signed_by_personnel_id = ?, signed_at = NOW() 
-         WHERE student_id = ?`,
-        [personnel_id, student_id]
-      );
-    } catch (err) {
-      console.warn('[MySQL Save Error]:', err);
-    }
+  if (!pool || !isDbConnected()) return res.status(503).json({ success: false, message: 'Database unavailable.' });
+  const identity = (req as AuthRequest).identity;
+  const [staffRows]: any = await pool.query('SELECT personnel_id FROM personnel WHERE user_id = ? LIMIT 1', [identity?.userId]);
+  if (!staffRows.length || staffRows[0].personnel_id !== personnel_id) {
+    return res.status(403).json({ success: false, message: 'You may only sign clearance as your own personnel account.' });
+  }
+  try {
+    const [result]: any = await pool.query(
+      `UPDATE clearance_assignments SET status = 'Approved', signed_by_personnel_id = ?, signed_at = NOW()
+       WHERE student_id = ?`,
+      [personnel_id, student_id]
+    );
+    if (!result.affectedRows) return res.status(404).json({ success: false, message: 'No clearance items were found for this student.' });
+  } catch (err) {
+    console.error('[MySQL] Clearance signature failed:', err instanceof Error ? err.message : 'unknown error');
+    return res.status(500).json({ success: false, message: 'Could not save clearance signature.' });
   }
 
   // Broadcast instantly to all APKs and Web
@@ -842,16 +937,22 @@ app.post('/api/clearance/undo', async (req: Request, res: Response) => {
   }
 
   const pool = getDbPool();
-  if (pool && isDbConnected()) {
-    try {
-      await pool.query(
-        `UPDATE clearance_assignments SET status = 'With Remarks', remarks = ? 
-         WHERE student_id = ?`,
-        [reason || 'Nasipyat og sign - gibawi sa magtutudlo', student_id]
-      );
-    } catch (err) {
-      console.warn('[MySQL Save Error]:', err);
-    }
+  if (!pool || !isDbConnected()) return res.status(503).json({ success: false, message: 'Database unavailable.' });
+  const identity = (req as AuthRequest).identity;
+  const [staffRows]: any = await pool.query('SELECT personnel_id FROM personnel WHERE user_id = ? LIMIT 1', [identity?.userId]);
+  if (!staffRows.length || staffRows[0].personnel_id !== personnel_id) {
+    return res.status(403).json({ success: false, message: 'You may only change signatures as your own personnel account.' });
+  }
+  try {
+    const [result]: any = await pool.query(
+      `UPDATE clearance_assignments SET status = 'With Remarks', remarks = ?
+       WHERE student_id = ? AND signed_by_personnel_id = ?`,
+      [reason || 'Nasipyat og sign - gibawi sa magtutudlo', student_id, personnel_id]
+    );
+    if (!result.affectedRows) return res.status(404).json({ success: false, message: 'No signature by this personnel account was found.' });
+  } catch (err) {
+    console.error('[MySQL] Signature revocation failed:', err instanceof Error ? err.message : 'unknown error');
+    return res.status(500).json({ success: false, message: 'Could not revoke clearance signature.' });
   }
 
   // Broadcast instantly to all APKs and Web
@@ -885,6 +986,7 @@ app.use('/api', (req: Request, res: Response) => {
 
 const startServer = async () => {
   await testDbConnection();
+  if (process.env.NODE_ENV === 'production') await ensureBootstrapAdmin();
 
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');

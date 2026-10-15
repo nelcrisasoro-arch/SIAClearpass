@@ -40,7 +40,7 @@ export const LoginScreenRN: React.FC<Props> = ({ onSuccess }) => {
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
       {/* Top SIA Badge (Figure 22) */}
       <View style={styles.topBadgeContainer}>
-        <Image source={schoolLogoUrl} style={styles.siaLogo} />
+        <Image source={{ uri: schoolLogoUrl }} style={styles.siaLogo} />
       </View>
 
       {/* Header Titles */}

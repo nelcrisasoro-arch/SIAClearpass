@@ -21,3 +21,11 @@ services:
         value: test
       - key: DB_SSL
         value: "true"
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
