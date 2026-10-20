@@ -11,6 +11,7 @@ import {
 import { useClearPass } from '../../context/ClearPassContext';
 import { StudentProfile } from '../../types/clearpass';
 import schoolLogoUrl from '../../assets/images/sia_school_logo.jpg';
+import { studentAvatarSource } from '../utils/avatarSource';
 
 interface Props {
   onNavigateTab: (tab: 'home' | 'requirements' | 'records' | 'notifications' | 'profile') => void;
@@ -44,7 +45,7 @@ export const StudentHomeScreenRN: React.FC<Props> = ({
     <View style={styles.container}>
       {/* Top Header Bar (Figure 20) */}
       <View style={styles.topBar}>
-        <Image source={{ uri: schoolLogoUrl }} style={styles.siaLogo} />
+        <Image source={schoolLogoUrl as any} style={styles.siaLogo} />
 
         <View style={styles.topRightIcons}>
           {/* Notification Bell */}
@@ -223,7 +224,7 @@ export const StudentHomeScreenRN: React.FC<Props> = ({
             <View style={styles.profileDetailsContent}>
               <View style={styles.avatarRow}>
                 <Image
-                  source={{ uri: student.avatar_url || '/src/assets/images/student_id_avatar_1790959893290.jpg' }}
+                  source={studentAvatarSource(student.avatar_url)}
                   style={styles.profileAvatar}
                 />
                 <View style={styles.avatarMeta}>

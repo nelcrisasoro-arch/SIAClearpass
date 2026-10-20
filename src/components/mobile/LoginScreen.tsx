@@ -48,7 +48,7 @@ export const LoginScreen: React.FC<Props> = ({ onSuccess, lockedRole, onBack }) 
         <span className="text-[10px] text-blue-900 font-semibold tracking-wider uppercase">SIA ClearPass System</span>
       </div>
 
-      {/* Role Selector Buttons (Figure 19) */}
+      {/* The role is fixed when this page is opened from its dedicated portal route. */}
       {!lockedRole ? <div className="mb-6">
         <label className="block text-xs font-semibold text-slate-600 mb-2 text-center">
           Select role:

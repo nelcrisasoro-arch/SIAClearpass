@@ -1,0 +1,19 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Build Android APK (EAS preview)",
+			"type": "shell",
+			"command": "powershell.exe",
+			"args": [
+				"-NoLogo",
+				"-NoProfile",
+				"-Command",
+				"Set-Location -LiteralPath '.\\mobile-clearpass'; eas build --platform android --profile preview --non-interactive"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
+}

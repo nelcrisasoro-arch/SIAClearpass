@@ -1,370 +1,129 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
+  Image,
+  PanResponder,
+  Pressable,
   ScrollView,
-  Alert,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 import { useClearPass } from '../../context/ClearPassContext';
 
-interface Props {
-  onBack: () => void;
-}
+interface Props { onBack: () => void }
+type Point = { x: number; y: number };
+type Stroke = Point[];
+const padWidth = 320;
+const padHeight = 180;
+const signaturePrefix = 'sia-signature:';
+
+const lineSegments = (strokes: Stroke[]) => strokes.flatMap((stroke, strokeIndex) => stroke.slice(1).map((point, pointIndex) => {
+  const prior = stroke[pointIndex];
+  const dx = point.x - prior.x;
+  const dy = point.y - prior.y;
+  const length = Math.sqrt(dx * dx + dy * dy);
+  return {
+    key: `${strokeIndex}-${pointIndex}`,
+    style: {
+      left: (prior.x + point.x) / 2 - length / 2,
+      top: (prior.y + point.y) / 2 - 1.5,
+      width: Math.max(length, 2),
+      transform: [{ rotate: `${Math.atan2(dy, dx)}rad` }],
+    },
+  };
+}));
+
+const parseSignature = (value: string): Stroke[] | null => {
+  if (!value.startsWith(signaturePrefix)) return null;
+  try {
+    const strokes: unknown = JSON.parse(value.slice(signaturePrefix.length));
+    return Array.isArray(strokes) ? strokes as Stroke[] : null;
+  } catch { return null; }
+};
 
 export const PersonnelSignatureScreenRN: React.FC<Props> = ({ onBack }) => {
   const { currentPersonnel, signatures, saveSignature } = useClearPass();
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [hasDrawn, setHasDrawn] = useState(false);
+  const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [savedSuccess, setSavedSuccess] = useState(false);
-
   const teacher = currentPersonnel;
-  const currentSig = signatures.find(s => s.personnel_id === teacher?.personnel_id);
+  const currentSig = signatures.find(signature => signature.personnel_id === teacher?.personnel_id);
 
-  // Initialize canvas
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+  const responder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: event => {
+      const { locationX, locationY } = event.nativeEvent;
+      setStrokes(previous => [...previous, [{ x: Math.max(0, Math.min(padWidth, locationX)), y: Math.max(0, Math.min(padHeight, locationY)) }]]);
+      setSavedSuccess(false);
+    },
+    onPanResponderMove: event => {
+      const { locationX, locationY } = event.nativeEvent;
+      const point = { x: Math.max(0, Math.min(padWidth, locationX)), y: Math.max(0, Math.min(padHeight, locationY)) };
+      setStrokes(previous => {
+        if (!previous.length) return [[point]];
+        const next = [...previous];
+        next[next.length - 1] = [...next[next.length - 1], point];
+        return next;
+      });
+    },
+  }), []);
 
-    ctx.strokeStyle = '#1e3a8a';
-    ctx.lineWidth = 3;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-  }, []);
-
-  const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    setIsDrawing(true);
-    setHasDrawn(true);
-  };
-
-  const draw = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!isDrawing) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    ctx.lineTo(x, y);
-    ctx.stroke();
-  };
-
-  const stopDrawing = () => {
-    setIsDrawing(false);
-  };
-
-  const handleClear = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    setHasDrawn(false);
-    setSavedSuccess(false);
-  };
-
-  const handleSave = () => {
-    if (!teacher) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const dataUrl = canvas.toDataURL('image/png');
-    saveSignature(teacher.personnel_id, dataUrl);
+  const save = () => {
+    if (!teacher || !strokes.some(stroke => stroke.length > 1)) return;
+    saveSignature(teacher.personnel_id, `${signaturePrefix}${JSON.stringify(strokes)}`);
     setSavedSuccess(true);
   };
 
+  const savedVector = currentSig ? parseSignature(currentSig.signature_data) : null;
+  const savedSegments = savedVector ? lineSegments(savedVector) : [];
+
   return (
     <View style={styles.container}>
-      {/* Top Header */}
       <View style={styles.topBar}>
-        <TouchableOpacity onPress={onBack} style={styles.backButton}>
-          <Text style={styles.backButtonText}>←</Text>
-        </TouchableOpacity>
+        <Pressable onPress={onBack} style={styles.backButton}><Text style={styles.backButtonText}>←</Text></Pressable>
         <Text style={styles.headerTitle}>Digital Signature</Text>
-        <View style={styles.siaPill}>
-          <Text style={styles.siaPillText}>SIA</Text>
-        </View>
+        <View style={styles.siaPill}><Text style={styles.siaPillText}>SIA</Text></View>
       </View>
-
-      <ScrollView style={styles.scrollList} showsVerticalScrollIndicator={false}>
-        <View style={styles.instructionsBox}>
-          <Text style={styles.titleText}>Register your signature here.</Text>
-          <Text style={styles.subtitleText}>
-            Use your fingertip or stylus pen to sign within the box. This will be officially embedded on all student clearance forms you approve.
-          </Text>
-        </View>
-
-        {/* Signature Pad Canvas Container (Figure 27) */}
-        <View style={styles.canvasContainer}>
-          <div className="w-full flex items-center justify-center p-2 bg-slate-50 rounded-xl border-2 border-dashed border-blue-900/30">
-            <canvas
-              ref={canvasRef}
-              width={320}
-              height={180}
-              onPointerDown={startDrawing}
-              onPointerMove={draw}
-              onPointerUp={stopDrawing}
-              onPointerLeave={stopDrawing}
-              className="bg-white rounded-lg shadow-inner cursor-crosshair touch-none w-full max-w-[320px] h-[180px]"
-            />
-          </div>
-          <Text style={styles.guideText}>Sign above the baseline · Official SIA Digital Signature Pad</Text>
-        </View>
-
-        {/* Action Buttons: Clear, Save, Edit (Figure 27) */}
-        <View style={styles.buttonsRow}>
-          <TouchableOpacity
-            style={styles.clearBtn}
-            onPress={handleClear}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.clearBtnText}>Clear</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.saveBtn}
-            onPress={handleSave}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.saveBtnText}>Save</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.editBtn}
-            onPress={handleClear}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.editBtnText}>Edit</Text>
-          </TouchableOpacity>
-        </View>
-
-        {savedSuccess && (
-          <View style={styles.successBanner}>
-            <Text style={styles.successBannerText}>
-              ✓ Digital signature registered successfully and ready to sign clearances!
-            </Text>
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <Text style={styles.title}>Register your signature here.</Text>
+        <Text style={styles.subtitle}>Use your fingertip or mouse to sign within the box. Your saved signature is attached to clearances you approve.</Text>
+        <View style={styles.canvasCard}>
+          <View style={styles.pad} {...responder.panHandlers}>
+            {lineSegments(strokes).map(line => <View key={line.key} pointerEvents="none" style={[styles.ink, line.style]} />)}
+            <View pointerEvents="none" style={styles.baseline} />
           </View>
-        )}
-
-        {/* Currently Registered Signature Card */}
-        {currentSig && (
-          <View style={styles.activeSignatureCard}>
-            <Text style={styles.activeSigHeader}>Currently Registered Signature</Text>
-            <View style={styles.signaturePreviewBox}>
-              <img
-                src={currentSig.signature_data}
-                alt="Registered Signature"
-                className="max-h-16 object-contain mx-auto"
-              />
-            </View>
-
-            <View style={styles.sigMetaRow}>
-              <Text style={styles.sigMetaLabel}>Verification Code:</Text>
-              <Text style={styles.sigMetaCode}>{currentSig.verification_code}</Text>
-            </View>
-
-            <View style={styles.sigMetaRow}>
-              <Text style={styles.sigMetaLabel}>Status:</Text>
-              <Text style={styles.sigMetaStatus}>ACTIVE & VERIFIED</Text>
-            </View>
+          <Text style={styles.guide}>Sign above the baseline · Official SIA Digital Signature Pad</Text>
+        </View>
+        <View style={styles.buttonRow}>
+          <Pressable onPress={() => { setStrokes([]); setSavedSuccess(false); }} style={[styles.button, styles.buttonLight]}><Text style={styles.lightText}>Clear</Text></Pressable>
+          <Pressable onPress={save} style={styles.button}><Text style={styles.buttonText}>Save signature</Text></Pressable>
+        </View>
+        {savedSuccess && <View style={styles.success}><Text style={styles.successText}>✓ Digital signature registered and ready to sign clearances.</Text></View>}
+        {currentSig && <View style={styles.savedCard}>
+          <Text style={styles.savedTitle}>Currently registered signature</Text>
+          <View style={styles.preview}>
+            {savedVector ? savedSegments.map(line => <View key={line.key} pointerEvents="none" style={[styles.ink, line.style]} />)
+              : <Image source={{ uri: currentSig.signature_data }} style={styles.imagePreview} resizeMode="contain" />}
           </View>
-        )}
+          <View style={styles.metaRow}><Text style={styles.metaLabel}>Verification code</Text><Text style={styles.metaValue}>{currentSig.verification_code}</Text></View>
+          <View style={styles.metaRow}><Text style={styles.metaLabel}>Status</Text><Text style={styles.activeText}>ACTIVE & VERIFIED</Text></View>
+        </View>}
       </ScrollView>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f8fafc',
-  },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: '#ffffff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
-  },
-  backButton: {
-    padding: 6,
-  },
-  backButtonText: {
-    fontSize: 20,
-    color: '#1e3a8a',
-    fontWeight: 'bold',
-  },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#0f172a',
-  },
-  siaPill: {
-    backgroundColor: '#1e3a8a',
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    borderRadius: 12,
-  },
-  siaPillText: {
-    color: '#ffffff',
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  scrollList: {
-    flex: 1,
-    padding: 16,
-  },
-  instructionsBox: {
-    marginBottom: 16,
-  },
-  titleText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#0f172a',
-  },
-  subtitleText: {
-    fontSize: 11,
-    color: '#64748b',
-    marginTop: 4,
-    lineHeight: 16,
-  },
-  canvasContainer: {
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    marginBottom: 16,
-    alignItems: 'center',
-  },
-  guideText: {
-    fontSize: 10,
-    color: '#94a3b8',
-    marginTop: 8,
-    fontStyle: 'italic',
-  },
-  buttonsRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 16,
-  },
-  clearBtn: {
-    flex: 1,
-    backgroundColor: '#f1f5f9',
-    paddingVertical: 11,
-    borderRadius: 10,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#cbd5e1',
-  },
-  clearBtnText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#475569',
-  },
-  saveBtn: {
-    flex: 1,
-    backgroundColor: '#1e3a8a',
-    paddingVertical: 11,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  saveBtnText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#ffffff',
-  },
-  editBtn: {
-    flex: 1,
-    backgroundColor: '#f1f5f9',
-    paddingVertical: 11,
-    borderRadius: 10,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#cbd5e1',
-  },
-  editBtnText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#475569',
-  },
-  successBanner: {
-    backgroundColor: '#dcfce7',
-    padding: 10,
-    borderRadius: 8,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#bbf7d0',
-  },
-  successBannerText: {
-    fontSize: 11,
-    color: '#15803d',
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  activeSignatureCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 14,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    marginBottom: 20,
-  },
-  activeSigHeader: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#334155',
-    marginBottom: 8,
-  },
-  signaturePreviewBox: {
-    backgroundColor: '#f8fafc',
-    padding: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  sigMetaRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 4,
-  },
-  sigMetaLabel: {
-    fontSize: 10,
-    color: '#64748b',
-  },
-  sigMetaCode: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#1e3a8a',
-    fontFamily: 'monospace',
-  },
-  sigMetaStatus: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#15803d',
-  },
+  container: { flex: 1, backgroundColor: '#f8fafc' },
+  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 11, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e2e8f0' },
+  backButton: { padding: 6 }, backButtonText: { fontSize: 21, color: '#1e3a8a', fontWeight: '800' }, headerTitle: { fontSize: 16, fontWeight: '800', color: '#0f172a' },
+  siaPill: { backgroundColor: '#1e3a8a', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }, siaPillText: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  content: { padding: 18, paddingBottom: 36, width: '100%', maxWidth: 680, alignSelf: 'center' }, title: { fontSize: 17, fontWeight: '800', color: '#0f172a' }, subtitle: { fontSize: 11, color: '#64748b', marginTop: 5, lineHeight: 17 },
+  canvasCard: { backgroundColor: '#fff', borderRadius: 15, padding: 13, borderWidth: 1, borderColor: '#dbe3ef', marginTop: 16, alignItems: 'center' },
+  pad: { width: '100%', maxWidth: padWidth, height: padHeight, backgroundColor: '#fff', borderRadius: 9, borderWidth: 1, borderStyle: 'dashed', borderColor: '#93a8cf', overflow: 'hidden', position: 'relative' },
+  ink: { position: 'absolute', height: 3, borderRadius: 2, backgroundColor: '#1e3a8a' }, baseline: { position: 'absolute', left: 14, right: 14, bottom: 34, height: 1, backgroundColor: '#dbe3ef' },
+  guide: { fontSize: 10, color: '#94a3b8', marginTop: 9, textAlign: 'center' }, buttonRow: { flexDirection: 'row', gap: 10, marginTop: 13 }, button: { flex: 1, minHeight: 43, backgroundColor: '#1e3a8a', paddingVertical: 12, borderRadius: 10, alignItems: 'center', justifyContent: 'center' }, buttonLight: { backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: '#cbd5e1' }, buttonText: { fontSize: 12, color: '#fff', fontWeight: '800' }, lightText: { fontSize: 12, color: '#475569', fontWeight: '700' },
+  success: { backgroundColor: '#dcfce7', padding: 11, borderRadius: 9, marginTop: 12, borderWidth: 1, borderColor: '#bbf7d0' }, successText: { color: '#15803d', textAlign: 'center', fontSize: 11, fontWeight: '700' },
+  savedCard: { backgroundColor: '#fff', borderRadius: 14, padding: 14, borderWidth: 1, borderColor: '#e2e8f0', marginTop: 17 }, savedTitle: { fontSize: 12, fontWeight: '800', color: '#334155', marginBottom: 9 }, preview: { height: 100, backgroundColor: '#f8fafc', borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0', overflow: 'hidden', position: 'relative', marginBottom: 9 }, imagePreview: { width: '100%', height: '100%' },
+  metaRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5 }, metaLabel: { fontSize: 10, color: '#64748b' }, metaValue: { fontSize: 10, fontWeight: '700', color: '#1e3a8a', fontFamily: 'monospace' }, activeText: { fontSize: 10, color: '#15803d', fontWeight: '800' },
 });

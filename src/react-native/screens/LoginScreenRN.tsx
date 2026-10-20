@@ -7,15 +7,18 @@ import {
   TextInput,
   ScrollView,
   Image,
+  Platform,
 } from 'react-native';
 import { useClearPass } from '../../context/ClearPassContext';
-import schoolLogoUrl from '../../assets/images/sia_school_logo.jpg';
+import { UserRole } from '../../types/clearpass';
+import schoolLogo from '../../assets/images/sia_school_logo.jpg';
 
 interface Props {
   onSuccess?: () => void;
+  allowedRoles?: UserRole[];
 }
 
-export const LoginScreenRN: React.FC<Props> = ({ onSuccess }) => {
+export const LoginScreenRN: React.FC<Props> = ({ onSuccess, allowedRoles = ['Student', 'Personnel'] }) => {
   const { authenticateUser, syncError } = useClearPass();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -28,7 +31,7 @@ export const LoginScreenRN: React.FC<Props> = ({ onSuccess }) => {
       return;
     }
 
-    const result = await authenticateUser(username, password);
+    const result = await authenticateUser(username, password, allowedRoles);
     if (result.success) {
       if (onSuccess) onSuccess();
     } else {
@@ -40,7 +43,7 @@ export const LoginScreenRN: React.FC<Props> = ({ onSuccess }) => {
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
       {/* Top SIA Badge (Figure 22) */}
       <View style={styles.topBadgeContainer}>
-        <Image source={{ uri: schoolLogoUrl }} style={styles.siaLogo} />
+        <Image source={schoolLogo as any} style={styles.siaLogo} resizeMode="contain" />
       </View>
 
       {/* Header Titles */}
@@ -120,8 +123,13 @@ export const LoginScreenRN: React.FC<Props> = ({ onSuccess }) => {
       </View>
 
       <Text style={styles.footerNote}>
-        Accounts and roles are managed exclusively in the Admin Web Portal.
+        One sign-in for students and personnel. Your role opens the matching dashboard.
       </Text>
+      {Platform.OS === 'web' ? (
+        <TouchableOpacity onPress={() => { if (typeof window !== 'undefined') window.location.href = '/admin'; }}>
+          <Text style={styles.adminLink}>Administrator web sign-in</Text>
+        </TouchableOpacity>
+      ) : null}
     </ScrollView>
   );
 };
@@ -352,5 +360,12 @@ const styles = StyleSheet.create({
     color: '#94a3b8',
     textAlign: 'center',
     marginTop: 16,
+  },
+  adminLink: {
+    color: '#1e3a8a',
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginTop: 12,
   },
 });

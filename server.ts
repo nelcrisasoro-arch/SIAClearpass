@@ -39,11 +39,25 @@ const ensureBootstrapAdmin = async () => {
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
   )`);
-  const [rows]: any = await pool.query('SELECT user_id FROM users WHERE role = \'Administrator\' LIMIT 1');
-  if (rows.length) return;
+  const passwordHash = await hashPassword(password);
+  const [matches]: any = await pool.query(
+    'SELECT user_id, role FROM users WHERE username = ? OR email = ?',
+    [username, email]
+  );
+  if (matches.length > 1) throw new Error('ADMIN_USERNAME and ADMIN_EMAIL must belong to the same account.');
+  if (matches.length === 1) {
+    if (matches[0].role !== 'Administrator') {
+      throw new Error('The configured admin username or email is already assigned to a non-admin account.');
+    }
+    await pool.query(
+      'UPDATE users SET username = ?, email = ?, password_hash = ?, name = ?, is_active = TRUE WHERE user_id = ?',
+      [username, email, passwordHash, 'SIA ClearPass Administrator', matches[0].user_id]
+    );
+    return;
+  }
   await pool.query(
     'INSERT INTO users (user_id, username, email, password_hash, role, name) VALUES (?, ?, ?, ?, \'Administrator\', ?)',
-    ['usr_admin', username, email, await hashPassword(password), 'SIA ClearPass Administrator']
+    ['usr_admin', username, email, passwordHash, 'SIA ClearPass Administrator']
   );
 };
 
@@ -67,6 +81,124 @@ const ensureStateTable = async () => {
   }
   await stateTableSetup;
   return pool;
+};
+
+const ensurePushTables = async () => {
+  const pool = await ensureStateTable();
+  await pool.query(`CREATE TABLE IF NOT EXISTS clearpass_push_tokens (
+    token VARCHAR(255) PRIMARY KEY,
+    user_id VARCHAR(64) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_clearpass_push_user (user_id)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS clearpass_push_outbox (
+    notification_id VARCHAR(100) PRIMARY KEY,
+    user_id VARCHAR(64) NOT NULL,
+    title VARCHAR(180) NOT NULL,
+    message TEXT NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    attempts INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_clearpass_push_pending (status, created_at),
+    INDEX idx_clearpass_push_user (user_id)
+  )`);
+  return pool;
+};
+
+const deliverPendingPushNotifications = async () => {
+  try {
+    if (!getDbPool() || !isDbConnected()) return;
+    const pool = await ensurePushTables();
+    await pool.query(
+      `UPDATE clearpass_push_outbox SET status = 'pending'
+       WHERE status = 'sending' AND updated_at < CURRENT_TIMESTAMP - INTERVAL 5 MINUTE`
+    );
+    const [pending]: any = await pool.query(
+      `SELECT notification_id, user_id, title, message
+       FROM clearpass_push_outbox
+       WHERE status = 'pending'
+       ORDER BY created_at ASC LIMIT 25`
+    );
+
+    for (const notification of pending) {
+      const [tokenRows]: any = await pool.query(
+        'SELECT token FROM clearpass_push_tokens WHERE user_id = ?',
+        [notification.user_id]
+      );
+      if (!tokenRows.length) continue;
+
+      const [claim]: any = await pool.query(
+        `UPDATE clearpass_push_outbox SET status = 'sending', attempts = attempts + 1
+         WHERE notification_id = ? AND status = 'pending'`,
+        [notification.notification_id]
+      );
+      if (!claim.affectedRows) continue;
+
+      try {
+        const messages = tokenRows.map((row: { token: string }) => ({
+          to: row.token,
+          sound: 'default',
+          title: String(notification.title).slice(0, 180),
+          body: String(notification.message).slice(0, 1800),
+          priority: 'high',
+          channelId: 'clearance-updates',
+          data: { notificationId: notification.notification_id },
+        }));
+        const response = await fetch('https://exp.host/--/api/v2/push/send', {
+          method: 'POST',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify(messages),
+        });
+        if (!response.ok) throw new Error(`Expo push returned HTTP ${response.status}.`);
+        const result: any = await response.json();
+        const tickets = Array.isArray(result?.data) ? result.data : [result?.data];
+        const invalidTokens = tickets
+          .filter((ticket: any) => ticket?.details?.error === 'DeviceNotRegistered')
+          .map((ticket: any) => messages[tickets.indexOf(ticket)]?.to)
+          .filter(Boolean);
+        if (invalidTokens.length) {
+          for (const invalidToken of invalidTokens) {
+            await pool.query('DELETE FROM clearpass_push_tokens WHERE token = ?', [invalidToken]);
+          }
+        }
+        await pool.query(
+          `UPDATE clearpass_push_outbox SET status = 'sent' WHERE notification_id = ?`,
+          [notification.notification_id]
+        );
+      } catch (error) {
+        await pool.query(
+          `UPDATE clearpass_push_outbox SET status = 'pending' WHERE notification_id = ?`,
+          [notification.notification_id]
+        );
+        console.error('[Expo push delivery error]:', error instanceof Error ? error.message : 'unknown');
+      }
+    }
+  } catch (error) {
+    console.error('[Expo push queue error]:', error instanceof Error ? error.message : 'unknown');
+  }
+};
+
+setInterval(() => { void deliverPendingPushNotifications(); }, 60000);
+
+const enqueuePushNotifications = async (notifications: any[]) => {
+  if (!notifications.length) return;
+  const pool = await ensurePushTables();
+  for (const notification of notifications) {
+    if (!notification?.notification_id || !notification?.user_id) continue;
+    await pool.query(
+      `INSERT IGNORE INTO clearpass_push_outbox (notification_id, user_id, title, message)
+       VALUES (?, ?, ?, ?)`,
+      [
+        String(notification.notification_id).slice(0, 100),
+        String(notification.user_id).slice(0, 64),
+        String(notification.title || 'SIA ClearPass').slice(0, 180),
+        String(notification.message || ''),
+      ]
+    );
+  }
+  await deliverPendingPushNotifications();
 };
 
 const allowedOrigins = new Set((process.env.CORS_ORIGINS || 'http://localhost:3000,http://127.0.0.1:3000')
@@ -160,6 +292,43 @@ setInterval(() => {
 // REST API ENDPOINTS
 // =========================================================================
 
+app.post('/api/push/register', async (req: AuthRequest, res: Response) => {
+  const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+  if (!token || token.length > 255 || !/^(Expo|Exponent)PushToken\[.+\]$/.test(token)) {
+    return res.status(400).json({ success: false, message: 'A valid Expo push token is required.' });
+  }
+
+  try {
+    const pool = await ensurePushTables();
+    await pool.query(
+      `INSERT INTO clearpass_push_tokens (token, user_id) VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), updated_at = CURRENT_TIMESTAMP`,
+      [token, req.identity?.userId]
+    );
+    void deliverPendingPushNotifications();
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('[Push token registration error]:', error instanceof Error ? error.message : 'unknown');
+    return res.status(503).json({ success: false, message: 'Could not register this device for notifications.' });
+  }
+});
+
+app.delete('/api/push/register', async (req: AuthRequest, res: Response) => {
+  try {
+    const pool = await ensurePushTables();
+    const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+    if (token) {
+      await pool.query('DELETE FROM clearpass_push_tokens WHERE user_id = ? AND token = ?', [req.identity?.userId, token]);
+    } else {
+      await pool.query('DELETE FROM clearpass_push_tokens WHERE user_id = ?', [req.identity?.userId]);
+    }
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('[Push token removal error]:', error instanceof Error ? error.message : 'unknown');
+    return res.status(503).json({ success: false, message: 'Could not remove this device notification registration.' });
+  }
+});
+
 // 1. Health & Status
 app.get('/api/health', (req: Request, res: Response) => {
   res.json({
@@ -197,7 +366,7 @@ app.get('/api/state', async (_req: Request, res: Response) => {
   }
 });
 
-app.put('/api/state', async (req: Request, res: Response) => {
+app.put('/api/state', async (req: AuthRequest, res: Response) => {
   const state = req.body?.state;
   const source = String(req.body?.source || '');
   if (!state || typeof state !== 'object' || Array.isArray(state)) {
@@ -206,6 +375,19 @@ app.put('/api/state', async (req: Request, res: Response) => {
 
   try {
     const pool = await ensureStateTable();
+    const [previousRows]: any = await pool.query(
+      `SELECT state_json FROM ${stateTable} WHERE state_key = 'main' LIMIT 1`
+    );
+    const previousState = previousRows[0]?.state_json ? JSON.parse(previousRows[0].state_json) : null;
+    const previousNotificationIds = new Set(
+      (Array.isArray(previousState?.notifications) ? previousState.notifications : [])
+        .map((item: any) => item?.notification_id)
+        .filter(Boolean)
+    );
+    const newNotifications = previousState
+      ? (Array.isArray(state.notifications) ? state.notifications : [])
+        .filter((item: any) => item?.notification_id && !previousNotificationIds.has(item.notification_id))
+      : [];
     const serializedState = JSON.stringify(state);
     await pool.query(
       `INSERT INTO ${stateTable} (state_key, state_json)
@@ -217,6 +399,9 @@ app.put('/api/state', async (req: Request, res: Response) => {
     broadcastRealtimeEvent({
       type: 'STATE_UPDATED',
       data: { source },
+    });
+    void enqueuePushNotifications(newNotifications).catch((error) => {
+      console.error('[Push notification enqueue error]:', error instanceof Error ? error.message : 'unknown');
     });
     return res.json({ success: true, updated_at: new Date().toISOString() });
   } catch (err: any) {
@@ -254,7 +439,10 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
 
       if (rows && rows.length > 0) {
         const found = rows[0];
-        if (req.body?.expectedRole && found.role !== req.body.expectedRole) {
+        const requestedRoles = req.body?.expectedRole
+          ? (Array.isArray(req.body.expectedRole) ? req.body.expectedRole : [req.body.expectedRole])
+          : null;
+        if (requestedRoles && !requestedRoles.includes(found.role)) {
           return res.status(401).json({ success: false, message: 'Invalid login credentials for the selected role.' });
         }
         const storedHash = String(found.password_hash || '');
@@ -376,10 +564,10 @@ app.post('/api/students', async (req: Request, res: Response) => {
   const rawGrade = String(req.body.grade_level || req.body.gradeLevel || 'Grade 9');
   const sect = String(req.body.section || 'Rose');
   const sYear = String(req.body.school_year || req.body.schoolYear || '2026-2027');
-  let uName = String(req.body.username || '').trim() || `${fName.toLowerCase()}.${lName.toLowerCase()}`.replace(/\s+/g, '');
-  let uEmail = String(req.body.email || '').trim() || `${uName}_${Date.now().toString().slice(-4)}@sia.edu.ph`;
-  const pass = String(req.body.password || '');
-  if (pass.length < 12) return res.status(400).json({ success: false, error: 'Set a temporary password with at least 12 characters.' });
+  const uName = lrn;
+  const uEmail = `${lrn}@students.sia.edu.ph`;
+  const pass = lrn.slice(-4);
+  if (!/^\d{12}$/.test(lrn)) return res.status(400).json({ success: false, error: 'Enter a valid 12-digit LRN.' });
   const passwordHash = await hashPassword(pass);
 
   if (!fName || !lName || !lrn) {
@@ -401,31 +589,36 @@ app.post('/api/students', async (req: Request, res: Response) => {
   }
 
   try {
-    // 1. Check if username or email already exists in users table
+    // Keep student credentials automatic: username is the LRN, password is its last 4 digits.
+    const [existingStudents]: any = await pool.query(
+      `SELECT student_id, user_id FROM students WHERE student_number = ? LIMIT 1`,
+      [lrn]
+    );
+    if (existingStudents && existingStudents.length > 0) {
+      finalStudentId = existingStudents[0].student_id;
+      finalUserId = existingStudents[0].user_id;
+    }
+
+    // 1. Reuse an existing student account, but never take over Personnel/Admin credentials.
     const [existingUsers]: any = await pool.query(
-      `SELECT user_id, role, username FROM users WHERE LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?) LIMIT 1`,
-      [uName, uEmail]
+      `SELECT user_id, role, username FROM users
+       WHERE LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?) OR user_id = ?`,
+      [uName, uEmail, finalUserId]
     );
 
     if (existingUsers && existingUsers.length > 0) {
-      const existing = existingUsers[0];
-      // If the username is already taken by Personnel or Admin, create unique student username
-      if (existing.role !== 'Student') {
-        uName = `${uName}.${lrn.slice(-4)}`;
-        uEmail = `${uName}@sia.edu.ph`;
-        await pool.query(
-          `INSERT INTO users (user_id, username, email, password_hash, role, name)
-             VALUES (?, ?, ?, ?, 'Student', ?)`,
-          [finalUserId, uName, uEmail, passwordHash, fullName]
-        );
-      } else {
-        // If already an existing student, use their existing user_id
-        finalUserId = existing.user_id;
-        await pool.query(
-          `UPDATE users SET name = ?, password_hash = ? WHERE user_id = ?`,
-          [fullName, passwordHash, finalUserId]
-        );
+      const existing = existingUsers.find((user: any) => user.user_id === finalUserId) || existingUsers[0];
+      if (existingUsers.some((user: any) => user.user_id !== existing.user_id)) {
+        return res.status(409).json({ success: false, error: 'The LRN is already assigned to another account.' });
       }
+      if (existing.role !== 'Student') {
+        return res.status(409).json({ success: false, error: 'The LRN is already assigned to a non-student account.' });
+      }
+      finalUserId = existing.user_id;
+      await pool.query(
+        `UPDATE users SET username = ?, email = ?, name = ?, password_hash = ? WHERE user_id = ?`,
+        [uName, uEmail, fullName, passwordHash, finalUserId]
+      );
     } else {
       // Brand new user
       await pool.query(
@@ -435,19 +628,12 @@ app.post('/api/students', async (req: Request, res: Response) => {
       );
     }
 
-    // 2. Check if student already exists by LRN (student_number)
-    const [existingStudents]: any = await pool.query(
-      `SELECT student_id, user_id FROM students WHERE student_number = ? LIMIT 1`,
-      [lrn]
-    );
-
     if (existingStudents && existingStudents.length > 0) {
-      finalStudentId = existingStudents[0].student_id;
       await pool.query(
         `UPDATE students 
-           SET first_name = ?, middle_name = ?, last_name = ?, suffix = ?, school_level = ?, grade_level = ?, section = ?, school_year = ?
+           SET user_id = ?, first_name = ?, middle_name = ?, last_name = ?, suffix = ?, school_level = ?, grade_level = ?, section = ?, school_year = ?
            WHERE student_id = ?`,
-        [fName, mName, lName, suf, sLevel, rawGrade, sect, sYear, finalStudentId]
+        [finalUserId, fName, mName, lName, suf, sLevel, rawGrade, sect, sYear, finalStudentId]
       );
     } else {
       await pool.query(

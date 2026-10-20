@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { useClearPass } from '../../context/ClearPassContext';
 import schoolLogoUrl from '../../assets/images/sia_school_logo.jpg';
+import { personnelAvatarSource } from '../utils/avatarSource';
 
 interface Props {
   onNavigateTab: (tab: 'home' | 'requirements' | 'submissions' | 'signature' | 'records' | 'profile') => void;
@@ -44,7 +45,7 @@ export const PersonnelHomeScreenRN: React.FC<Props> = ({ onNavigateTab }) => {
     <View style={styles.container}>
       {/* Top Header Bar (Figure 24) */}
       <View style={styles.topBar}>
-        <Image source={{ uri: schoolLogoUrl }} style={styles.siaLogo} />
+        <Image source={schoolLogoUrl as any} style={styles.siaLogo} />
 
         <View style={styles.topRightIcons}>
           <TouchableOpacity
@@ -229,7 +230,7 @@ export const PersonnelHomeScreenRN: React.FC<Props> = ({ onNavigateTab }) => {
             <View style={styles.profileDetailsContent}>
               <View style={styles.avatarRow}>
                 <Image
-                  source={{ uri: teacher.avatar_url || '/src/assets/images/personnel_id_avatar_1790959908050.jpg' }}
+                  source={personnelAvatarSource(teacher.avatar_url)}
                   style={styles.profileAvatar}
                 />
                 <View style={styles.avatarMeta}>

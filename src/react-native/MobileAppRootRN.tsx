@@ -15,7 +15,8 @@ import { PersonnelSignatureScreenRN } from './screens/PersonnelSignatureScreenRN
 import { PersonnelRecordsScreenRN } from './screens/PersonnelRecordsScreenRN';
 import { PersonnelProfileScreenRN } from './screens/PersonnelProfileScreenRN';
 import { StudentTabBarRN, PersonnelTabBarRN } from './components/BottomTabBarRN';
-import { ClearanceCertificateModal } from '../components/common/ClearanceCertificateModal';
+import { ClearanceCertificateModalRN } from './components/ClearanceCertificateModalRN';
+import { PushNotificationRegistrationRN } from './components/PushNotificationRegistrationRN';
 
 export const MobileAppRootRN: React.FC = () => {
   const { currentUser, currentRole, logout, syncError } = useClearPass();
@@ -28,14 +29,15 @@ export const MobileAppRootRN: React.FC = () => {
   const [certificateStudent, setCertificateStudent] = useState<StudentProfile | null>(null);
 
   // If user is not logged in, render mobile login screen (Figure 19)
-  if (!currentUser) {
-    return <LoginScreenRN onSuccess={() => {}} />;
+  if (!currentUser || (currentRole !== 'Student' && currentRole !== 'Personnel')) {
+    return <LoginScreenRN onSuccess={() => {}} allowedRoles={['Student', 'Personnel']} />;
   }
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" />
       <View style={styles.container}>
+        <PushNotificationRegistrationRN />
         {syncError && (
           <Text accessibilityRole="alert" style={styles.syncError}>
             Database/realtime sync issue: {syncError}
@@ -131,8 +133,8 @@ export const MobileAppRootRN: React.FC = () => {
 
         {/* Official Clearance Certificate Document Modal */}
         {certificateStudent && (
-          <ClearanceCertificateModal
-            isOpen={!!certificateStudent}
+          <ClearanceCertificateModalRN
+            visible={!!certificateStudent}
             onClose={() => setCertificateStudent(null)}
             student={certificateStudent}
           />

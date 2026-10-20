@@ -30,6 +30,7 @@ import {
   INITIAL_NOTIFICATIONS,
 } from '../data/initialData';
 import { apiFetch, apiUrl, realtimeUrl } from '../utils/api';
+import { appStorage } from '../utils/storage';
 
 export type DeviceMode = 'mobile' | 'responsive' | 'admin_web';
 
@@ -67,7 +68,7 @@ interface ClearPassContextType {
   triggerDemoPushNotification: (type?: 'approval' | 'remarks' | 'complete') => void;
   switchRole: (role: UserRole) => void;
   loginUser: (usernameOrRole: string, password?: string, expectedRole?: UserRole) => { success: boolean; role?: UserRole; message?: string };
-  authenticateUser: (username: string, password: string, expectedRole?: UserRole) => Promise<{ success: boolean; role?: UserRole; message?: string }>;
+  authenticateUser: (username: string, password: string, expectedRole?: UserRole | UserRole[]) => Promise<{ success: boolean; role?: UserRole; message?: string }>;
   logout: () => void;
   submitRequirement: (params: {
     assignment_id: string;
@@ -161,62 +162,62 @@ const ClearPassContext = createContext<ClearPassContextType | undefined>(undefin
 export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Load initial from localStorage if available
   const [users, setUsers] = useState<User[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_users`);
+    const saved = appStorage.getItem(`${STORAGE_KEY}_users`);
     return saved ? JSON.parse(saved) : INITIAL_USERS;
   });
 
   const [students, setStudents] = useState<StudentProfile[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_students`);
+    const saved = appStorage.getItem(`${STORAGE_KEY}_students`);
     return saved ? JSON.parse(saved) : INITIAL_STUDENTS;
   });
 
   const [personnel, setPersonnel] = useState<PersonnelProfile[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_personnel`);
+    const saved = appStorage.getItem(`${STORAGE_KEY}_personnel`);
     return saved ? JSON.parse(saved) : INITIAL_PERSONNEL;
   });
 
   const [clearanceForms, setClearanceForms] = useState<ClearanceForm[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_forms`);
+    const saved = appStorage.getItem(`${STORAGE_KEY}_forms`);
     return saved ? JSON.parse(saved) : INITIAL_CLEARANCE_FORMS;
   });
 
   const [clearancePeriods, setClearancePeriods] = useState<ClearancePeriod[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_periods`);
+    const saved = appStorage.getItem(`${STORAGE_KEY}_periods`);
     return saved ? JSON.parse(saved) : INITIAL_CLEARANCE_PERIODS;
   });
 
   const [signatories, setSignatories] = useState<ClearanceSignatory[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_signatories`);
+    const saved = appStorage.getItem(`${STORAGE_KEY}_signatories`);
     return saved ? JSON.parse(saved) : INITIAL_SIGNATORIES;
   });
 
   const [requirements, setRequirements] = useState<ClearanceRequirement[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_requirements`);
+    const saved = appStorage.getItem(`${STORAGE_KEY}_requirements`);
     return saved ? JSON.parse(saved) : INITIAL_REQUIREMENTS;
   });
 
   const [assignments, setAssignments] = useState<StudentRequirementAssignment[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_assignments`);
+    const saved = appStorage.getItem(`${STORAGE_KEY}_assignments`);
     return saved ? JSON.parse(saved) : INITIAL_STUDENT_ASSIGNMENTS;
   });
 
   const [submissions, setSubmissions] = useState<RequirementSubmission[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_submissions`);
+    const saved = appStorage.getItem(`${STORAGE_KEY}_submissions`);
     return saved ? JSON.parse(saved) : INITIAL_SUBMISSIONS;
   });
 
   const [records, setRecords] = useState<ClearanceRecord[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_records`);
+    const saved = appStorage.getItem(`${STORAGE_KEY}_records`);
     return saved ? JSON.parse(saved) : INITIAL_CLEARANCE_RECORDS;
   });
 
   const [signatures, setSignatures] = useState<DigitalSignature[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_signatures`);
+    const saved = appStorage.getItem(`${STORAGE_KEY}_signatures`);
     return saved ? JSON.parse(saved) : INITIAL_DIGITAL_SIGNATURES;
   });
 
   const [notifications, setNotifications] = useState<NotificationItem[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_notifications`);
+    const saved = appStorage.getItem(`${STORAGE_KEY}_notifications`);
     return saved ? JSON.parse(saved) : INITIAL_NOTIFICATIONS;
   });
   const [syncError, setSyncError] = useState<string | null>(null);
@@ -360,7 +361,7 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       try {
         new Notification(item.title, {
           body: item.message,
-          icon: '/src/assets/images/sia_school_crest_1790959872395.jpg',
+          icon: '/src/assets/images/sia_school_logo.jpg',
         });
       } catch (err) {
         console.error('System notification error:', err);
@@ -427,18 +428,18 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // Sync to local storage
   useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY}_users`, JSON.stringify(users));
-    localStorage.setItem(`${STORAGE_KEY}_students`, JSON.stringify(students));
-    localStorage.setItem(`${STORAGE_KEY}_personnel`, JSON.stringify(personnel));
-    localStorage.setItem(`${STORAGE_KEY}_forms`, JSON.stringify(clearanceForms));
-    localStorage.setItem(`${STORAGE_KEY}_periods`, JSON.stringify(clearancePeriods));
-    localStorage.setItem(`${STORAGE_KEY}_signatories`, JSON.stringify(signatories));
-    localStorage.setItem(`${STORAGE_KEY}_requirements`, JSON.stringify(requirements));
-    localStorage.setItem(`${STORAGE_KEY}_assignments`, JSON.stringify(assignments));
-    localStorage.setItem(`${STORAGE_KEY}_submissions`, JSON.stringify(submissions));
-    localStorage.setItem(`${STORAGE_KEY}_records`, JSON.stringify(records));
-    localStorage.setItem(`${STORAGE_KEY}_signatures`, JSON.stringify(signatures));
-    localStorage.setItem(`${STORAGE_KEY}_notifications`, JSON.stringify(notifications));
+    appStorage.setItem(`${STORAGE_KEY}_users`, JSON.stringify(users));
+    appStorage.setItem(`${STORAGE_KEY}_students`, JSON.stringify(students));
+    appStorage.setItem(`${STORAGE_KEY}_personnel`, JSON.stringify(personnel));
+    appStorage.setItem(`${STORAGE_KEY}_forms`, JSON.stringify(clearanceForms));
+    appStorage.setItem(`${STORAGE_KEY}_periods`, JSON.stringify(clearancePeriods));
+    appStorage.setItem(`${STORAGE_KEY}_signatories`, JSON.stringify(signatories));
+    appStorage.setItem(`${STORAGE_KEY}_requirements`, JSON.stringify(requirements));
+    appStorage.setItem(`${STORAGE_KEY}_assignments`, JSON.stringify(assignments));
+    appStorage.setItem(`${STORAGE_KEY}_submissions`, JSON.stringify(submissions));
+    appStorage.setItem(`${STORAGE_KEY}_records`, JSON.stringify(records));
+    appStorage.setItem(`${STORAGE_KEY}_signatures`, JSON.stringify(signatures));
+    appStorage.setItem(`${STORAGE_KEY}_notifications`, JSON.stringify(notifications));
   }, [users, students, personnel, clearanceForms, clearancePeriods, signatories, requirements, assignments, submissions, records, signatures, notifications]);
 
   useEffect(() => {
@@ -592,7 +593,7 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     };
   };
 
-  const authenticateUser = async (username: string, password: string, expectedRole?: UserRole) => {
+  const authenticateUser = async (username: string, password: string, expectedRole?: UserRole | UserRole[]) => {
     try {
       const response = await fetch(apiUrl('/api/auth/login'), {
         method: 'POST',
@@ -603,11 +604,12 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (!response.ok || !result.success) {
         return { success: false, message: result.message || 'Invalid username or password.' };
       }
-      if (expectedRole && result.role !== expectedRole) {
+      const allowedRoles = expectedRole ? (Array.isArray(expectedRole) ? expectedRole : [expectedRole]) : null;
+      if (allowedRoles && !allowedRoles.includes(result.role)) {
         return { success: false, message: 'Invalid login credentials for the selected role.' };
       }
 
-      if (result.sessionToken) localStorage.setItem('sia_clearpass_session', result.sessionToken);
+      if (result.sessionToken) appStorage.setItem('sia_clearpass_session', result.sessionToken);
 
       const now = new Date().toISOString();
       const authenticatedUser: User = {
@@ -680,8 +682,15 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const logout = () => {
+    const pushToken = appStorage.getItem('sia_clearpass_push_token');
+    void apiFetch('/api/push/register', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: pushToken }),
+    }).catch(() => undefined);
+    appStorage.removeItem('sia_clearpass_push_token');
     void apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => undefined);
-    localStorage.removeItem('sia_clearpass_session');
+    appStorage.removeItem('sia_clearpass_session');
     setCurrentUser(null);
   };
 
@@ -1379,18 +1388,18 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const resetAllData = () => {
-    localStorage.removeItem(`${STORAGE_KEY}_users`);
-    localStorage.removeItem(`${STORAGE_KEY}_students`);
-    localStorage.removeItem(`${STORAGE_KEY}_personnel`);
-    localStorage.removeItem(`${STORAGE_KEY}_forms`);
-    localStorage.removeItem(`${STORAGE_KEY}_periods`);
-    localStorage.removeItem(`${STORAGE_KEY}_signatories`);
-    localStorage.removeItem(`${STORAGE_KEY}_requirements`);
-    localStorage.removeItem(`${STORAGE_KEY}_assignments`);
-    localStorage.removeItem(`${STORAGE_KEY}_submissions`);
-    localStorage.removeItem(`${STORAGE_KEY}_records`);
-    localStorage.removeItem(`${STORAGE_KEY}_signatures`);
-    localStorage.removeItem(`${STORAGE_KEY}_notifications`);
+    appStorage.removeItem(`${STORAGE_KEY}_users`);
+    appStorage.removeItem(`${STORAGE_KEY}_students`);
+    appStorage.removeItem(`${STORAGE_KEY}_personnel`);
+    appStorage.removeItem(`${STORAGE_KEY}_forms`);
+    appStorage.removeItem(`${STORAGE_KEY}_periods`);
+    appStorage.removeItem(`${STORAGE_KEY}_signatories`);
+    appStorage.removeItem(`${STORAGE_KEY}_requirements`);
+    appStorage.removeItem(`${STORAGE_KEY}_assignments`);
+    appStorage.removeItem(`${STORAGE_KEY}_submissions`);
+    appStorage.removeItem(`${STORAGE_KEY}_records`);
+    appStorage.removeItem(`${STORAGE_KEY}_signatures`);
+    appStorage.removeItem(`${STORAGE_KEY}_notifications`);
 
     setUsers(INITIAL_USERS);
     setStudents(INITIAL_STUDENTS);

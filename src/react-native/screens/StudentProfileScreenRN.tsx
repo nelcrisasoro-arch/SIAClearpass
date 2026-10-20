@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,8 @@ import {
   Modal,
 } from 'react-native';
 import { useClearPass } from '../../context/ClearPassContext';
+import { pickProfileImage } from '../../utils/imagePicker';
+import { studentAvatarSource } from '../utils/avatarSource';
 
 interface Props {
   onBack: () => void;
@@ -26,7 +28,6 @@ const PRESET_AVATARS = [
 
 export const StudentProfileScreenRN: React.FC<Props> = ({ onBack, onLogout }) => {
   const { currentStudent, updateStudentProfile, getStudentProgress } = useClearPass();
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
   const [phone, setPhone] = useState('0912 345 6789');
@@ -44,20 +45,12 @@ export const StudentProfileScreenRN: React.FC<Props> = ({ onBack, onLogout }) =>
     triggerNotice();
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string;
-      if (dataUrl) {
-        updateStudentProfile(currentStudent.student_id, { avatar_url: dataUrl });
-        setIsPhotoModalOpen(false);
-        triggerNotice();
-      }
-    };
-    reader.readAsDataURL(file);
+  const handleFileUpload = async () => {
+    const imageUri = await pickProfileImage();
+    if (!imageUri) return;
+    updateStudentProfile(currentStudent.student_id, { avatar_url: imageUri });
+    setIsPhotoModalOpen(false);
+    triggerNotice();
   };
 
   const triggerNotice = () => {
@@ -71,15 +64,6 @@ export const StudentProfileScreenRN: React.FC<Props> = ({ onBack, onLogout }) =>
 
   return (
     <View style={styles.container}>
-      {/* Hidden file input for custom uploads */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        style={{ display: 'none' }}
-        onChange={handleFileUpload}
-      />
-
       {/* Top Header */}
       <View style={styles.topBar}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
@@ -102,9 +86,7 @@ export const StudentProfileScreenRN: React.FC<Props> = ({ onBack, onLogout }) =>
         <View style={styles.profileHeaderCard}>
           <View style={styles.avatarWrapper}>
             <Image
-              source={{
-                uri: currentStudent.avatar_url || '/src/assets/images/student_id_avatar_1790959908050.jpg',
-              }}
+              source={studentAvatarSource(currentStudent.avatar_url)}
               style={styles.avatarImage}
             />
             {/* Edit / Add Photo Button */}
@@ -250,7 +232,7 @@ export const StudentProfileScreenRN: React.FC<Props> = ({ onBack, onLogout }) =>
             {/* Upload Button */}
             <TouchableOpacity
               style={styles.uploadFileBtn}
-              onPress={() => fileInputRef.current?.click()}
+              onPress={() => { void handleFileUpload(); }}
               activeOpacity={0.8}
             >
               <Text style={styles.uploadFileIcon}>📁</Text>
@@ -269,7 +251,7 @@ export const StudentProfileScreenRN: React.FC<Props> = ({ onBack, onLogout }) =>
                   onPress={() => handleSelectPreset(url)}
                   style={styles.presetAvatarBox}
                 >
-                  <Image source={{ uri: url }} style={styles.presetAvatarImg} />
+                  <Image source={studentAvatarSource(url)} style={styles.presetAvatarImg} />
                 </TouchableOpacity>
               ))}
             </View>

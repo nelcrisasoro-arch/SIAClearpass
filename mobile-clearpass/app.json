@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "SIA ClearPass",
+    "slug": "sia-clearpass",
+    "owner": "nelcris",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "defaultChannel": "clearance-updates",
+          "color": "#1e3a8a"
+        }
+      ],
+      "expo-image-picker"
+    ],
+    "icon": "./assets/sia-clearpass-icon.jpg",
+    "android": {
+      "package": "com.sia.clearpass",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/sia-clearpass-adaptive-foreground.jpg",
+        "backgroundColor": "#1e3a8a"
+      }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "9420fa8e-80aa-44ee-b02e-921425c3a069"
+      }
+    }
+  }
+}

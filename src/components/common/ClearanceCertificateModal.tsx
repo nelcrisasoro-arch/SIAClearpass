@@ -86,8 +86,8 @@ export const ClearanceCertificateModal: React.FC<Props> = ({
             <div className="text-center border-b-2 border-slate-300 pb-5 mb-6 relative">
               <div className="flex items-center justify-center gap-4 mb-2">
                 <img
-                  src="/src/assets/images/sia_school_crest_1790959872395.jpg"
-                  alt="St. Isidore Academy Crest"
+                  src="/src/assets/images/sia_school_logo.jpg"
+                  alt="St. Isidore Academy school logo"
                   className="w-16 h-16 rounded-full object-cover border-2 border-blue-900 shadow-sm"
                   onError={(e) => {
                     (e.target as HTMLElement).style.display = 'none';

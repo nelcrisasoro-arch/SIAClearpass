@@ -1,3 +1,5 @@
+import { appStorage } from './storage';
+
 type ApiRuntime = typeof globalThis & {
   __CLEARPASS_API_BASE_URL__?: string;
 };
@@ -12,7 +14,7 @@ const getApiBaseUrl = () => {
 export const apiUrl = (path: string) => `${getApiBaseUrl()}${path.startsWith('/') ? path : `/${path}`}`;
 
 export const getSessionToken = () => {
-  try { return localStorage.getItem('sia_clearpass_session'); } catch { return null; }
+  return appStorage.getItem('sia_clearpass_session');
 };
 
 export const apiFetch = (path: string, init: RequestInit = {}) => {

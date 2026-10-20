@@ -104,8 +104,6 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
   const [sLastName, setSLastName] = useState('');
   const [sSuffix, setSSuffix] = useState('');
   const [sLrn, setSLrn] = useState('');
-  const [sUsername, setSUsername] = useState('');
-  const [sPassword, setSPassword] = useState('');
   const [sSchoolLevel, setSSchoolLevel] = useState('Junior High School');
   const [sGradeLevel, setSGradeLevel] = useState('Grade 9');
   const [sSection, setSSection] = useState('Rose');
@@ -288,8 +286,6 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
     setSLastName(profile.last_name);
     setSSuffix(profile.suffix || '');
     setSLrn(profile.student_number);
-    setSUsername(users.find(user => user.user_id === profile.user_id)?.email.split('@')[0] || '');
-    setSPassword('');
     setSSchoolLevel(profile.school_level);
     setSGradeLevel(profile.grade_level);
     setSSection(profile.section);
@@ -303,7 +299,11 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
     setDeleteError(null);
     if (!sFirstName.trim() || !sLastName.trim()) return;
 
-    const lrnNo = sLrn.trim() || String(Math.floor(100000000000 + Math.random() * 900000000000));
+    const lrnNo = sLrn.trim();
+    if (!/^\d{12}$/.test(lrnNo)) {
+      setDeleteError('Enter a valid 12-digit LRN.');
+      return;
+    }
 
     if (editingStudentId) {
       try {
@@ -326,8 +326,6 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
         setSLastName('');
         setSSuffix('');
         setSLrn('');
-        setSUsername('');
-        setSPassword('');
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error.';
         console.error('[Student update failed]:', error);
@@ -336,13 +334,8 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
       return;
     }
 
-    const finalUsername = sUsername.trim() || `${sFirstName.trim().toLowerCase()}.${sLastName.trim().toLowerCase()}`.replace(/\s+/g, '');
     const fullName = `${sLastName}, ${sFirstName} ${sMiddleName} ${sSuffix}`.trim();
-    const studentPass = sPassword.trim();
-    if (studentPass.length < 12) {
-      setDeleteError('Set a temporary password with at least 12 characters.');
-      return;
-    }
+    const studentPass = lrnNo.slice(-4);
 
     const userId = `usr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const studentId = `std_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -362,7 +355,7 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
           grade_level: sGradeLevel,
           section: sSection,
           school_year: '2026-2027',
-          username: finalUsername,
+          username: lrnNo,
           password: studentPass,
         }),
       });
@@ -399,8 +392,6 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
     setSFirstName('');
     setSMiddleName('');
     setSLastName('');
-    setSUsername('');
-    setSPassword('');
     setSLrn('');
   };
 
@@ -700,8 +691,6 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
                       setSLastName('');
                       setSSuffix('');
                       setSLrn('');
-                      setSUsername('');
-                      setSPassword('');
                       setSSchoolLevel('Junior High School');
                       setSGradeLevel('Grade 9');
                       setSSection('Rose');
@@ -1761,21 +1750,18 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
                 <input
                   type="text"
                   required
+                  inputMode="numeric"
+                  maxLength={12}
+                  pattern="[0-9]{12}"
                   placeholder="e.g. 117947100018 (12-digit DepEd LRN)"
                   value={sLrn}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setSLrn(val);
-                    if (val.length >= 4 && !editingStudentId) {
-                      setSPassword(`Student${val.slice(-4)}!SIA`);
-                    }
-                  }}
+                  onChange={(e) => setSLrn(e.target.value.replace(/\D/g, '').slice(0, 12))}
                   className="w-full p-2 bg-slate-50 border border-slate-300 rounded-lg font-mono"
                 />
                 <span className="text-[10px] text-blue-600 font-medium mt-0.5 block">
                   {editingStudentId
-                    ? 'Changing the LRN does not change the existing login password.'
-                    : `Password will automatically be set to the last 4 digits of the LRN (${sLrn.length >= 4 ? sLrn.slice(-4) : 'e.g. 0018'}).`}
+                    ? 'Existing student login credentials stay unchanged when you update the LRN.'
+                    : 'The student signs in with the LRN as username and its last 4 digits as the initial password.'}
                 </span>
               </div>
 
@@ -1838,36 +1824,11 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
                 </div>
               </div>
 
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-1">
                 <span className="font-bold text-slate-800 block text-[11px] uppercase tracking-wider">
-                  Mobile App Credentials (Given to Student)
+                  Student Mobile Login
                 </span>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Username *</label>
-                    <input
-                      type="text"
-                      required={!editingStudentId}
-                      placeholder="e.g. joseph.corre"
-                      value={sUsername}
-                      onChange={(e) => setSUsername(e.target.value)}
-                      className="w-full p-2 bg-white border border-slate-300 rounded-lg font-mono text-xs"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">
-                      Password (Last 4 of LRN) *
-                    </label>
-                    <input
-                      type="text"
-                      required={!editingStudentId}
-                      placeholder={editingStudentId ? 'Unchanged' : 'e.g. 0018'}
-                      value={sPassword}
-                      onChange={(e) => setSPassword(e.target.value)}
-                      className="w-full p-2 bg-white border border-slate-300 rounded-lg font-mono text-xs font-bold text-blue-700"
-                    />
-                  </div>
-                </div>
+                <p className="text-[11px] text-slate-600">Username is the 12-digit LRN. The initial password is the last 4 digits of that LRN; the administrator cannot set a separate student password here.</p>
               </div>
 
               <div className="flex gap-2 mt-2">
@@ -1879,8 +1840,6 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
                     setSMiddleName('Santos');
                     setSLastName('DelaCruz');
                     setSLrn(`11794710${rnd}`);
-                    setSUsername(`juan.delacruz${rnd}`);
-                    setSPassword(`Student${rnd}!SIA`);
                   }}
                   className="w-1/3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold text-xs cursor-pointer border border-slate-300 transition-colors"
                 >

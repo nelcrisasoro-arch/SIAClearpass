@@ -4,7 +4,7 @@
     "slug": "sia-clearpass",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./src/assets/images/sia_school_crest_1790959872395.jpg",
+    "icon": "./src/assets/images/sia_school_logo.jpg",
     "userInterfaceStyle": "light",
     "splash": {
       "backgroundColor": "#1e3a8a",
