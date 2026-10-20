@@ -26,8 +26,8 @@ const ensureBootstrapAdmin = async () => {
   const username = process.env.ADMIN_USERNAME?.trim();
   const password = process.env.ADMIN_PASSWORD;
   const email = process.env.ADMIN_EMAIL?.trim() || 'admin@sia.edu.ph';
-  if (!username || !password || password.length < 14) {
-    throw new Error('Set ADMIN_USERNAME and ADMIN_PASSWORD (at least 14 characters) in the hosting secrets before starting.');
+  if (!username || !password || password.length < 8) {
+    throw new Error('Set ADMIN_USERNAME and ADMIN_PASSWORD (at least 8 characters) in the hosting secrets before starting.');
   }
   const pool = getDbPool();
   if (!pool || !isDbConnected()) throw new Error('MySQL is required in production.');
