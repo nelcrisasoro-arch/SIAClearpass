@@ -13,6 +13,7 @@ import {
 import { useClearPass } from '../../context/ClearPassContext';
 import { apiFetch } from '../../utils/api';
 import { PersonnelProfile, StudentProfile, UserRole } from '../../types/clearpass';
+import schoolLogo from '../../assets/images/sia_school_logo.jpg';
 
 type Section = 'dashboard' | 'accounts' | 'forms' | 'periods' | 'records';
 type AccountDraft = {
@@ -42,8 +43,6 @@ const blankAccount = (role: 'Student' | 'Personnel'): AccountDraft => ({
   position: 'Subject Teacher & Clearance Signatory', subject: 'General Academics',
   schoolLevel: 'Junior High School', gradeLevel: 'Grade 9', section: 'Rose',
 });
-
-const logo = require('../../assets/images/sia_school_logo.jpg');
 
 const AdminPortalScreenRN: React.FC = () => {
   const {
@@ -229,7 +228,7 @@ const AdminPortalScreenRN: React.FC = () => {
     return (
       <View style={styles.loginBackdrop}>
         <View style={styles.loginCard}>
-          <View style={styles.loginLogoFrame}><Image source={logo} style={styles.loginLogo} resizeMode="cover" /></View>
+          <View style={styles.loginLogoFrame}><Image source={schoolLogo as any} style={styles.loginLogo} resizeMode="cover" /></View>
           <Text style={styles.loginTitle}>Administrator Portal</Text>
           <Text style={styles.loginSub}>St. Isidore Academy of Trinidad Bohol, Inc.</Text>
           <View style={styles.trustBadge}><Text style={styles.trustIcon}>◆</Text><Text style={styles.trustText}>Official DepEd Clearance System Web Console</Text></View>
