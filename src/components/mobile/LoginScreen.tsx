@@ -1,20 +1,23 @@
 import React, { useState } from 'react';
 import { useClearPass } from '../../context/ClearPassContext';
 import { UserRole } from '../../types/clearpass';
-import { UserCheck, Users, Eye, EyeOff, ShieldCheck, ArrowRight } from 'lucide-react';
+import { UserCheck, Users, Eye, EyeOff, ShieldCheck, ArrowLeft } from 'lucide-react';
 import { SchoolLogo } from '../common/SchoolLogo';
 
 interface Props {
   onSuccess?: () => void;
+  lockedRole?: UserRole;
+  onBack?: () => void;
 }
 
-export const LoginScreen: React.FC<Props> = ({ onSuccess }) => {
+export const LoginScreen: React.FC<Props> = ({ onSuccess, lockedRole, onBack }) => {
   const { authenticateUser } = useClearPass();
   const [selectedRole, setSelectedRole] = useState<UserRole>('Student');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const activeRole = lockedRole ?? selectedRole;
 
   const handleRoleSelect = (role: UserRole) => {
     setSelectedRole(role);
@@ -24,7 +27,7 @@ export const LoginScreen: React.FC<Props> = ({ onSuccess }) => {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const result = await authenticateUser(username, password, selectedRole);
+    const result = await authenticateUser(username, password, activeRole);
     if (result.success) {
       if (onSuccess) onSuccess();
     } else {
@@ -40,13 +43,13 @@ export const LoginScreen: React.FC<Props> = ({ onSuccess }) => {
         <div className="w-12 h-6 bg-blue-900 text-white font-extrabold text-[11px] rounded-full flex items-center justify-center shadow-sm">
           SIA
         </div>
-        <h2 className="text-2xl font-bold text-slate-800 mt-2">Welcome!</h2>
+        <h2 className="text-2xl font-bold text-slate-800 mt-2">{lockedRole ? `${lockedRole} Login` : 'Welcome!'}</h2>
         <p className="text-xs text-slate-500 font-medium">St. Isidore Academy of Trinidad Bohol, Inc.</p>
         <span className="text-[10px] text-blue-900 font-semibold tracking-wider uppercase">SIA ClearPass System</span>
       </div>
 
       {/* Role Selector Buttons (Figure 19) */}
-      <div className="mb-6">
+      {!lockedRole ? <div className="mb-6">
         <label className="block text-xs font-semibold text-slate-600 mb-2 text-center">
           Select role:
         </label>
@@ -83,7 +86,14 @@ export const LoginScreen: React.FC<Props> = ({ onSuccess }) => {
             <span className="text-xs">Student</span>
           </button>
         </div>
-      </div>
+      </div> : (
+        <div className="mb-6 text-center">
+          <span className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-xs font-bold text-blue-950">
+            {lockedRole === 'Student' ? <Users className="h-4 w-4" /> : <UserCheck className="h-4 w-4" />}
+            Sign in to the {lockedRole} portal
+          </span>
+        </div>
+      )}
 
       {/* Login Form */}
       <form onSubmit={handleLogin} className="space-y-4 max-w-xs mx-auto w-full">
@@ -139,6 +149,16 @@ export const LoginScreen: React.FC<Props> = ({ onSuccess }) => {
           Login
         </button>
       </form>
+
+      {onBack && (
+        <button
+          type="button"
+          onClick={onBack}
+          className="mx-auto mt-5 flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-blue-950"
+        >
+          <ArrowLeft className="h-4 w-4" /> Back to account selection
+        </button>
+      )}
 
     </div>
   );
