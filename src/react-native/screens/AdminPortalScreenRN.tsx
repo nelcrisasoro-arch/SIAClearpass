@@ -2,7 +2,6 @@ import React, { useMemo, useState } from 'react';
 import {
   Image,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -49,7 +48,7 @@ const logo = require('../../assets/images/sia_school_logo.jpg');
 const AdminPortalScreenRN: React.FC = () => {
   const {
     currentUser, users, students, personnel, records, clearanceForms, clearancePeriods,
-    assignments, submissions, syncError, authenticateUser, logout, addUser, deleteUser,
+    assignments, submissions, signatories, activePeriod, activeForm, syncError, authenticateUser, logout, addUser, deleteUser,
     updateAdminStudent, updateAdminPersonnel, addClearanceForm, addClearancePeriod,
   } = useClearPass();
   const { width } = useWindowDimensions();
@@ -233,36 +232,31 @@ const AdminPortalScreenRN: React.FC = () => {
           <Image source={logo} style={styles.loginLogo} resizeMode="contain" />
           <Text style={styles.loginTitle}>Administrator Portal</Text>
           <Text style={styles.loginSub}>St. Isidore Academy of Trinidad Bohol, Inc.</Text>
-          <View style={styles.trustBadge}><Text style={styles.trustText}>OFFICIAL SCHOOL ADMIN CONSOLE</Text></View>
+          <View style={styles.trustBadge}><Text style={styles.trustIcon}>◆</Text><Text style={styles.trustText}>Official DepEd Clearance System Web Console</Text></View>
           {!!loginError && <Notice text={loginError} error />}
-          <Field label="Administrator username" value={username} onChangeText={setUsername} autoCapitalize="none" placeholder="Enter username" />
+          <Field label="Administrator Username" value={username} onChangeText={setUsername} autoCapitalize="none" placeholder="admin" />
           <Field label="Password" value={password} onChangeText={setPassword} secureTextEntry placeholder="Enter password" />
-          <ActionButton label={busy ? 'Signing in…' : 'Sign in to dashboard'} onPress={() => void handleLogin()} disabled={busy} />
-          {Platform.OS === 'web' && <Pressable onPress={() => { if (typeof window !== 'undefined') window.location.href = '/'; }} style={styles.linkButton}><Text style={styles.linkText}>Student & personnel sign-in</Text></Pressable>}
-          <Text style={styles.loginFoot}>Administrator access is managed by the school.</Text>
+          <ActionButton label={busy ? 'Signing in…' : 'Sign In to Administrator Dashboard'} onPress={() => void handleLogin()} disabled={busy} />
+          <Text style={styles.loginFoot}>Authorized access only · School Year 2026-2027</Text>
         </View>
       </View>
     );
   }
 
   const tabs: { id: Section; label: string }[] = [
-    { id: 'dashboard', label: 'Dashboard' }, { id: 'accounts', label: 'User accounts' },
-    { id: 'forms', label: 'Clearance forms' }, { id: 'periods', label: 'Periods' }, { id: 'records', label: 'Records' },
+    { id: 'dashboard', label: 'Clearance Dashboard' }, { id: 'accounts', label: 'User Management (Accounts)' },
+    { id: 'forms', label: 'Clearance Form' }, { id: 'periods', label: 'Clearance Period' }, { id: 'records', label: 'Clearance Record' },
   ];
+  const totalEnrolled = students.length;
   const cleared = records.filter(record => record.overall_status === 'Cleared' || record.progress_percentage === 100).length;
-  const openSubmissions = submissions.filter(item => item.submission_status === 'Pending' || item.submission_status === 'With Remarks').length;
+  const totalUncleared = Math.max(0, totalEnrolled - cleared);
+  const progressPercent = totalEnrolled ? Math.round((cleared / totalEnrolled) * 100) : 0;
 
   return (
     <View style={styles.app}>
       <View style={[styles.header, wide && styles.headerWide]}>
-        <View style={styles.brand}>
-          <Image source={logo} style={styles.brandLogo} resizeMode="contain" />
-          <View><Text style={styles.brandTitle}>SIA ClearPass</Text><Text style={styles.brandSub}>Administrator console</Text></View>
-        </View>
-        <View style={styles.headerRight}>
-          <Text style={styles.adminName}>{currentUser.name}</Text>
-          <Pressable onPress={logout} style={styles.logoutButton}><Text style={styles.logoutText}>Sign out</Text></Pressable>
-        </View>
+        <View style={styles.headerLeft}><Text style={styles.schoolBadge}>St. Isidore Academy of Trinidad Bohol, Inc.</Text><Text style={styles.headerContext}>Administrator Web Console · Provisioning School Personnel & Students</Text></View>
+        <View style={styles.headerRight}><View style={styles.headerIdentity}><Text style={styles.adminName}>Admin Office</Text><Text style={styles.adminRole}>System Administrator</Text></View><View style={styles.adminAvatar}><Text style={styles.adminAvatarText}>AD</Text></View><Pressable onPress={logout} style={styles.logoutButton}><Text style={styles.logoutText}>Admin Logout</Text></Pressable></View>
       </View>
 
       <View style={[styles.layout, wide && styles.layoutWide]}>
@@ -283,19 +277,20 @@ const AdminPortalScreenRN: React.FC = () => {
           {notice ? <Notice text={notice} onClose={() => setNotice('')} /> : null}
 
           {section === 'dashboard' && <>
-            <View style={styles.pageIntro}><Text style={styles.eyebrow}>OVERVIEW</Text><Text style={styles.pageTitle}>Clearance management</Text><Text style={styles.pageSub}>Accounts, clearance periods, and school records in one place.</Text></View>
+            <View style={styles.dashboardHeader}><View style={styles.pageIntro}><Text style={styles.pageTitle}>Clearance Management Dashboard</Text><Text style={styles.pageSub}>School-wide clearance progress overview, real-time signatory monitoring, and student analytics.</Text></View><View style={styles.dashboardBadges}><View style={styles.onlineBadge}><View style={styles.onlineDot} /><Text style={styles.onlineText}>Real-Time Central Server: Online</Text></View><View style={styles.periodBadge}><Text style={styles.periodBadgeText}>{activePeriod ? `SY: ${activePeriod.school_year} ${activePeriod.term}` : 'No clearance period configured'}</Text></View></View></View>
             <View style={styles.metricGrid}>
-              <Metric label="Students" value={students.length} tone="blue" />
-              <Metric label="Personnel" value={personnel.length} tone="purple" />
-              <Metric label="Cleared" value={cleared} tone="green" />
-              <Metric label="Pending reviews" value={openSubmissions} tone="amber" />
+              <Metric label="Total Enrolled" value={totalEnrolled} tone="slate" hint="Junior & Senior High School" icon="🎓" />
+              <Metric label="Cleared Students" value={cleared} tone="green" hint={`${progressPercent}% clearance completion`} icon="✓" />
+              <Metric label="In Progress / Deficient" value={totalUncleared} tone="amber" hint="Pending department sign-offs" icon="◷" />
+              <Metric label="Signatory Dept Heads" value={signatories.length} tone="blue" hint="Authorized Department Heads" icon="✍" />
             </View>
+            <View style={styles.panel}><View style={styles.progressHeader}><View><Text style={styles.panelTitle}>Institutional Clearance Progress</Text><Text style={styles.panelSub}>Live progress across selected school level and sections</Text></View><Text style={styles.progressPercent}>{progressPercent}% Complete</Text></View><View style={styles.progressTrackLarge}><View style={[styles.progressValue, { width: `${progressPercent}%` }]} /></View><Text style={styles.progressCaption}>{cleared} of {totalEnrolled} enrolled students cleared</Text></View>
             <View style={styles.panel}><Text style={styles.panelTitle}>Quick actions</Text><Text style={styles.panelSub}>Choose a section to manage the clearance system.</Text><View style={styles.quickGrid}>
-              <ActionButton label="Manage accounts" onPress={() => setSection('accounts')} />
+              <ActionButton label="Manage user accounts" onPress={() => setSection('accounts')} />
               <ActionButton label="Create clearance form" variant="light" onPress={() => setSection('forms')} />
               <ActionButton label="Set clearance period" variant="light" onPress={() => setSection('periods')} />
             </View></View>
-            <View style={styles.panel}><Text style={styles.panelTitle}>Active clearance form</Text><Text style={styles.panelSub}>{clearanceForms.find(item => item.status === 1)?.form_name || 'No active clearance form yet.'}</Text></View>
+            <View style={styles.panel}><Text style={styles.panelTitle}>Active clearance form</Text><Text style={styles.panelSub}>{activeForm?.form_name || clearanceForms.find(item => item.status === 1)?.form_name || 'No active clearance form yet.'}</Text></View>
           </>}
 
           {section === 'accounts' && <>
@@ -406,7 +401,7 @@ const SmallButton: React.FC<{ label: string; onPress: () => void; danger?: boole
 
 const NavButton: React.FC<{ label: string; active: boolean; onPress: () => void; compact?: boolean }> = ({ label, active, onPress, compact }) => <Pressable onPress={onPress} style={[styles.navButton, active && styles.navButtonActive, compact && styles.navButtonCompact]}><Text style={[styles.navButtonText, active && styles.navButtonTextActive]}>{label}</Text></Pressable>;
 
-const Metric: React.FC<{ label: string; value: number; tone: 'blue' | 'purple' | 'green' | 'amber' }> = ({ label, value, tone }) => <View style={[styles.metricCard, styles[`metric_${tone}`]]}><Text style={styles.metricValue}>{value}</Text><Text style={styles.metricLabel}>{label}</Text></View>;
+const Metric: React.FC<{ label: string; value: number; tone: 'slate' | 'blue' | 'purple' | 'green' | 'amber'; hint: string; icon: string }> = ({ label, value, tone, hint, icon }) => <View style={[styles.metricCard, styles[`metric_${tone}`]]}><View style={styles.metricTop}><Text style={styles.metricLabel}>{label}</Text><Text style={styles.metricIcon}>{icon}</Text></View><Text style={styles.metricValue}>{value}</Text><Text style={styles.metricHint}>{hint}</Text></View>;
 
 const Notice: React.FC<{ text: string; error?: boolean; onClose?: () => void }> = ({ text, error, onClose }) => <View style={[styles.notice, error && styles.noticeError]}><Text style={[styles.noticeText, error && styles.noticeErrorText]}>{text}</Text>{onClose && <Pressable onPress={onClose}><Text style={styles.noticeDismiss}>×</Text></Pressable>}</View>;
 
@@ -415,30 +410,33 @@ const StatusPill: React.FC<{ label: string }> = ({ label }) => <View style={styl
 const EmptyState: React.FC<{ text: string }> = ({ text }) => <View style={styles.emptyState}><Text style={styles.emptyText}>{text}</Text></View>;
 
 const styles = StyleSheet.create({
-  app: { flex: 1, minHeight: '100%', backgroundColor: '#f4f7fc' },
-  loginBackdrop: { flex: 1, minHeight: '100%', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0f1c42', padding: 20 },
-  loginCard: { width: '100%', maxWidth: 430, backgroundColor: '#fff', borderRadius: 24, padding: 28, borderWidth: 1, borderColor: '#dbe4f1', shadowColor: '#071633', shadowOpacity: 0.18, shadowRadius: 20, elevation: 7 },
-  loginLogo: { width: 92, height: 92, alignSelf: 'center', borderRadius: 46, marginBottom: 14 },
-  loginTitle: { color: '#122349', fontSize: 24, fontWeight: '800', textAlign: 'center' },
-  loginSub: { marginTop: 5, marginBottom: 12, color: '#64748b', fontSize: 12, textAlign: 'center' },
-  trustBadge: { alignSelf: 'center', backgroundColor: '#eff6ff', borderColor: '#bfdbfe', borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7, marginBottom: 18 },
-  trustText: { color: '#1e3a8a', fontSize: 10, fontWeight: '800', letterSpacing: 0.4 },
-  loginFoot: { color: '#94a3b8', textAlign: 'center', fontSize: 11, marginTop: 18 },
+  app: { flex: 1, minHeight: '100%', backgroundColor: '#f1f5f9' },
+  loginBackdrop: { flex: 1, minHeight: '100%', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0f172a', padding: 24 },
+  loginCard: { width: '100%', maxWidth: 430, backgroundColor: '#fff', borderRadius: 24, padding: 30, borderWidth: 1, borderColor: '#e2e8f0', shadowColor: '#020617', shadowOpacity: 0.3, shadowRadius: 24, elevation: 10 },
+  loginLogo: { width: 94, height: 94, alignSelf: 'center', borderRadius: 47, marginBottom: 14 },
+  loginTitle: { color: '#0f172a', fontSize: 21, fontWeight: '800', textAlign: 'center' },
+  loginSub: { marginTop: 5, marginBottom: 10, color: '#64748b', fontSize: 12, textAlign: 'center' },
+  trustBadge: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#eff6ff', borderColor: '#bfdbfe', borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7, marginBottom: 18 },
+  trustIcon: { color: '#1e3a8a', fontSize: 10 }, trustText: { color: '#1e3a8a', fontSize: 10, fontWeight: '800', letterSpacing: 0.15 },
+  loginFoot: { color: '#94a3b8', textAlign: 'center', fontSize: 11, marginTop: 20, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#e2e8f0' },
   linkButton: { alignSelf: 'center', padding: 12 }, linkText: { color: '#1e40af', fontWeight: '700', fontSize: 12 },
-  header: { minHeight: 72, backgroundColor: '#fff', borderBottomColor: '#e2e8f0', borderBottomWidth: 1, paddingHorizontal: 20, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  header: { minHeight: 56, backgroundColor: '#fff', borderBottomColor: '#e2e8f0', borderBottomWidth: 1, paddingHorizontal: 20, paddingVertical: 9, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   headerWide: { paddingHorizontal: 28 },
   brand: { flexDirection: 'row', alignItems: 'center', gap: 10 }, brandLogo: { width: 46, height: 46, borderRadius: 23 },
   brandTitle: { color: '#122349', fontSize: 16, fontWeight: '800' }, brandSub: { color: '#64748b', fontSize: 11, marginTop: 2 },
-  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 14 }, adminName: { color: '#475569', fontSize: 12, fontWeight: '700' },
-  logoutButton: { borderRadius: 10, borderColor: '#dbe3ef', borderWidth: 1, paddingHorizontal: 13, paddingVertical: 9 }, logoutText: { color: '#334155', fontSize: 12, fontWeight: '700' },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flexShrink: 1 }, schoolBadge: { color: '#1e3a8a', backgroundColor: '#eff6ff', borderColor: '#bfdbfe', borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6, fontSize: 10, fontWeight: '800' }, headerContext: { color: '#64748b', fontSize: 10, flexShrink: 1 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 }, headerIdentity: { alignItems: 'flex-end' }, adminName: { color: '#1e293b', fontSize: 11, fontWeight: '800' }, adminRole: { color: '#64748b', fontSize: 9, marginTop: 2 }, adminAvatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#1e3a8a', alignItems: 'center', justifyContent: 'center' }, adminAvatarText: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  logoutButton: { borderRadius: 8, backgroundColor: '#4c0519', borderColor: '#881337', borderWidth: 1, paddingHorizontal: 10, paddingVertical: 8 }, logoutText: { color: '#fecdd3', fontSize: 10, fontWeight: '700' },
   layout: { flex: 1 }, layoutWide: { flexDirection: 'row', alignItems: 'stretch' },
-  sidebar: { width: 238, backgroundColor: '#fff', borderRightWidth: 1, borderRightColor: '#e2e8f0', padding: 18 }, navCaption: { color: '#94a3b8', fontSize: 10, fontWeight: '800', letterSpacing: 1, marginHorizontal: 12, marginTop: 10, marginBottom: 12 },
-  navButton: { paddingHorizontal: 13, paddingVertical: 12, borderRadius: 11, marginBottom: 5 }, navButtonActive: { backgroundColor: '#eaf1ff' }, navButtonText: { color: '#64748b', fontWeight: '700', fontSize: 12 }, navButtonTextActive: { color: '#17377e' },
+  sidebar: { width: 256, backgroundColor: '#0f172a', borderRightWidth: 1, borderRightColor: '#1e293b', padding: 12 }, navCaption: { color: '#64748b', fontSize: 10, fontWeight: '800', letterSpacing: 1, marginHorizontal: 12, marginTop: 12, marginBottom: 12 },
+  navButton: { paddingHorizontal: 13, paddingVertical: 12, borderRadius: 8, marginBottom: 5 }, navButtonActive: { backgroundColor: '#1e40af' }, navButtonText: { color: '#94a3b8', fontWeight: '700', fontSize: 11 }, navButtonTextActive: { color: '#fff' },
   navButtonCompact: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#e2e8f0', marginRight: 8, marginBottom: 0 }, mobileNav: { paddingHorizontal: 14, paddingVertical: 12 },
-  sidebarFooter: { marginTop: 'auto', padding: 12, borderTopWidth: 1, borderColor: '#e2e8f0' }, sidebarFooterText: { color: '#94a3b8', fontSize: 10, marginVertical: 2 },
-  content: { flex: 1 }, contentInner: { width: '100%', maxWidth: 1250, alignSelf: 'center', padding: 22, paddingBottom: 48 },
-  pageIntro: { marginBottom: 20 }, eyebrow: { color: '#3461b5', fontSize: 10, letterSpacing: 1.2, fontWeight: '800', marginBottom: 6 }, pageTitle: { color: '#122349', fontSize: 26, fontWeight: '800' }, pageSub: { color: '#64748b', fontSize: 13, lineHeight: 19, marginTop: 5 },
-  metricGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 18 }, metricCard: { flexGrow: 1, flexBasis: 155, minHeight: 115, borderRadius: 16, padding: 18, borderWidth: 1 }, metric_blue: { backgroundColor: '#eff6ff', borderColor: '#dbeafe' }, metric_purple: { backgroundColor: '#f5f3ff', borderColor: '#e9d5ff' }, metric_green: { backgroundColor: '#ecfdf5', borderColor: '#bbf7d0' }, metric_amber: { backgroundColor: '#fffbeb', borderColor: '#fde68a' }, metricValue: { color: '#122349', fontSize: 28, fontWeight: '800' }, metricLabel: { color: '#64748b', marginTop: 5, fontSize: 12, fontWeight: '600' },
+  sidebarFooter: { marginTop: 'auto', padding: 12, borderTopWidth: 1, borderColor: '#1e293b' }, sidebarFooterText: { color: '#64748b', fontSize: 10, marginVertical: 2 },
+  content: { flex: 1 }, contentInner: { width: '100%', maxWidth: 1250, alignSelf: 'center', padding: 24, paddingBottom: 48 },
+  pageIntro: { marginBottom: 20 }, eyebrow: { color: '#3461b5', fontSize: 10, letterSpacing: 1.2, fontWeight: '800', marginBottom: 6 }, pageTitle: { color: '#0f172a', fontSize: 21, fontWeight: '800' }, pageSub: { color: '#64748b', fontSize: 12, lineHeight: 18, marginTop: 5 },
+  dashboardHeader: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, backgroundColor: '#fff', borderRadius: 16, borderColor: '#e2e8f0', borderWidth: 1, padding: 20, marginBottom: 18 }, dashboardBadges: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, onlineBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#ecfdf5', borderColor: '#bbf7d0', borderWidth: 1, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 7 }, onlineDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#22c55e' }, onlineText: { color: '#166534', fontSize: 10, fontWeight: '800' }, periodBadge: { backgroundColor: '#eff6ff', borderColor: '#bfdbfe', borderWidth: 1, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 7 }, periodBadgeText: { color: '#1e3a8a', fontSize: 10, fontWeight: '800' },
+  metricGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 18 }, metricCard: { flexGrow: 1, flexBasis: 180, minHeight: 125, borderRadius: 16, padding: 17, borderWidth: 1, backgroundColor: '#fff', borderColor: '#e2e8f0' }, metric_slate: { borderColor: '#e2e8f0' }, metric_blue: { backgroundColor: '#eff6ff', borderColor: '#bfdbfe' }, metric_purple: { backgroundColor: '#f5f3ff', borderColor: '#e9d5ff' }, metric_green: { backgroundColor: '#ecfdf5', borderColor: '#bbf7d0' }, metric_amber: { backgroundColor: '#fffbeb', borderColor: '#fde68a' }, metricTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, metricIcon: { color: '#64748b', backgroundColor: '#f1f5f9', borderRadius: 9, paddingHorizontal: 8, paddingVertical: 5, fontSize: 12 }, metricValue: { color: '#0f172a', fontSize: 28, fontWeight: '800', marginTop: 10 }, metricLabel: { color: '#475569', fontSize: 11, fontWeight: '700' }, metricHint: { color: '#94a3b8', marginTop: 4, fontSize: 10 },
+  progressHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }, progressPercent: { color: '#1e3a8a', backgroundColor: '#eff6ff', borderColor: '#bfdbfe', borderWidth: 1, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 7, fontSize: 11, fontWeight: '800' }, progressTrackLarge: { height: 24, borderRadius: 14, backgroundColor: '#f1f5f9', borderColor: '#e2e8f0', borderWidth: 1, padding: 4, overflow: 'hidden', marginTop: 12 }, progressCaption: { color: '#64748b', fontSize: 10, marginTop: 7 },
   panel: { backgroundColor: '#fff', borderRadius: 16, borderColor: '#e2e8f0', borderWidth: 1, padding: 19, marginBottom: 16, shadowColor: '#0f172a', shadowOpacity: 0.03, shadowRadius: 7, elevation: 1 }, panelTitle: { color: '#122349', fontSize: 16, fontWeight: '800' }, panelSub: { color: '#64748b', fontSize: 12, lineHeight: 18, marginTop: 4, marginBottom: 12 }, quickGrid: { gap: 9, marginTop: 5 },
   actionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginBottom: 14 }, actionButton: { minHeight: 42, backgroundColor: '#1e3a8a', borderRadius: 10, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 15, paddingVertical: 11 }, actionButtonLight: { backgroundColor: '#eff6ff', borderWidth: 1, borderColor: '#dbeafe' }, actionButtonDanger: { backgroundColor: '#b91c1c' }, actionButtonText: { color: '#fff', fontWeight: '800', fontSize: 12 }, actionButtonTextLight: { color: '#1e3a8a' }, disabledButton: { opacity: 0.55 }, pressedButton: { opacity: 0.82 },
   fieldGroup: { width: '100%', marginBottom: 12 }, fieldLabel: { color: '#334155', fontSize: 11, fontWeight: '700', marginBottom: 5 }, input: { width: '100%', minHeight: 42, borderRadius: 9, borderColor: '#cbd5e1', borderWidth: 1, backgroundColor: '#f8fafc', color: '#0f172a', paddingHorizontal: 11, paddingVertical: 9, fontSize: 13 },
