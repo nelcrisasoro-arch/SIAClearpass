@@ -229,13 +229,13 @@ const AdminPortalScreenRN: React.FC = () => {
     return (
       <View style={styles.loginBackdrop}>
         <View style={styles.loginCard}>
-          <Image source={logo} style={styles.loginLogo} resizeMode="contain" />
+          <View style={styles.loginLogoFrame}><Image source={logo} style={styles.loginLogo} resizeMode="cover" /></View>
           <Text style={styles.loginTitle}>Administrator Portal</Text>
           <Text style={styles.loginSub}>St. Isidore Academy of Trinidad Bohol, Inc.</Text>
           <View style={styles.trustBadge}><Text style={styles.trustIcon}>◆</Text><Text style={styles.trustText}>Official DepEd Clearance System Web Console</Text></View>
           {!!loginError && <Notice text={loginError} error />}
           <Field label="Administrator Username" value={username} onChangeText={setUsername} autoCapitalize="none" placeholder="admin" />
-          <Field label="Password" value={password} onChangeText={setPassword} secureTextEntry placeholder="Enter password" />
+          <Field label="Password" value={password} onChangeText={setPassword} secureTextEntry placeholder="••••••••" />
           <ActionButton label={busy ? 'Signing in…' : 'Sign In to Administrator Dashboard'} onPress={() => void handleLogin()} disabled={busy} />
           <Text style={styles.loginFoot}>Authorized access only · School Year 2026-2027</Text>
         </View>
@@ -411,9 +411,10 @@ const EmptyState: React.FC<{ text: string }> = ({ text }) => <View style={styles
 
 const styles = StyleSheet.create({
   app: { flex: 1, minHeight: '100%', backgroundColor: '#f1f5f9' },
-  loginBackdrop: { flex: 1, minHeight: '100%', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0f172a', padding: 24 },
+  loginBackdrop: { flex: 1, minHeight: '100%', alignItems: 'center', justifyContent: 'center', backgroundColor: '#020617', padding: 24 },
   loginCard: { width: '100%', maxWidth: 430, backgroundColor: '#fff', borderRadius: 24, padding: 30, borderWidth: 1, borderColor: '#e2e8f0', shadowColor: '#020617', shadowOpacity: 0.3, shadowRadius: 24, elevation: 10 },
-  loginLogo: { width: 94, height: 94, alignSelf: 'center', borderRadius: 47, marginBottom: 14 },
+  loginLogoFrame: { width: 96, height: 96, alignSelf: 'center', borderRadius: 48, borderWidth: 2, borderColor: '#1e3a8a', backgroundColor: '#fff', padding: 4, marginBottom: 14, shadowColor: '#0f172a', shadowOpacity: 0.18, shadowRadius: 7, elevation: 3 },
+  loginLogo: { width: '100%', height: '100%', borderRadius: 44 },
   loginTitle: { color: '#0f172a', fontSize: 21, fontWeight: '800', textAlign: 'center' },
   loginSub: { marginTop: 5, marginBottom: 10, color: '#64748b', fontSize: 12, textAlign: 'center' },
   trustBadge: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#eff6ff', borderColor: '#bfdbfe', borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7, marginBottom: 18 },
