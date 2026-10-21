@@ -226,6 +226,8 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [syncError, setSyncError] = useState<string | null>(null);
   const [serverStateLoaded, setServerStateLoaded] = useState(false);
   const lastSyncedState = useRef<string | null>(null);
+  const serverStateVersion = useRef<number | null>(null);
+  const stateSyncQueue = useRef<Promise<void>>(Promise.resolve());
   const syncClientId = useRef(`client_${Date.now()}_${Math.random().toString(36).slice(2)}`);
 
   const getDataSnapshot = () => ({
@@ -253,28 +255,21 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
     let active = true;
     let requestSequence = 0;
-    let refreshTimer: ReturnType<typeof setInterval> | undefined;
+    let stateLoadInFlight = false;
+    let loadRequested = false;
+    let versionCheckInFlight = false;
+    let versionTimer: ReturnType<typeof setInterval> | undefined;
     let realtimeConnected = false;
 
-    const startFallbackPolling = () => {
-      if (!active || refreshTimer) return;
-      setSyncError('Real-time connection interrupted. Checking for updates every few seconds.');
-      void loadSharedState();
-      refreshTimer = setInterval(() => {
-        void loadSharedState();
-      }, 3000);
-    };
-
-    const stopFallbackPolling = () => {
-      if (!refreshTimer) return;
-      clearInterval(refreshTimer);
-      refreshTimer = undefined;
-    };
-
     const loadSharedState = async () => {
+      if (stateLoadInFlight) {
+        loadRequested = true;
+        return;
+      }
+      stateLoadInFlight = true;
       const requestId = ++requestSequence;
       try {
-        const response = await apiFetch('/api/state');
+        const response = await apiFetch('/api/state', { cache: 'no-store' });
         if (response.status === 401) {
           if (active) {
             appStorage.removeItem('sia_clearpass_session');
@@ -305,9 +300,11 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             setSignatures(Array.isArray(state.signatures) ? state.signatures : INITIAL_DIGITAL_SIGNATURES);
             setNotifications(Array.isArray(state.notifications) ? state.notifications : INITIAL_NOTIFICATIONS);
             lastSyncedState.current = JSON.stringify(state);
+            serverStateVersion.current = Number(result.revision ?? 0);
           }
         }
         if (active && requestId === requestSequence) {
+          serverStateVersion.current = Number(result.revision ?? 0);
           if (realtimeConnected) setSyncError(null);
           setServerStateLoaded(true);
         }
@@ -318,6 +315,42 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           setSyncError(message);
           setServerStateLoaded(true);
         }
+      } finally {
+        stateLoadInFlight = false;
+        if (loadRequested && active) {
+          loadRequested = false;
+          void loadSharedState();
+        }
+      }
+    };
+
+    const checkStateVersion = async () => {
+      if (!active || versionCheckInFlight) return;
+      versionCheckInFlight = true;
+      try {
+        const response = await apiFetch('/api/state/version', { cache: 'no-store' });
+        if (response.status === 401) {
+          appStorage.removeItem('sia_clearpass_session');
+          setSyncError('Your session expired. Sign in again to sync clearance changes.');
+          setServerStateLoaded(false);
+          setCurrentUser(null);
+          return;
+        }
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+          throw new Error(result.message || `Database sync failed (${response.status}).`);
+        }
+        const revision = Number(result.revision ?? 0);
+        if (serverStateVersion.current === null || revision !== serverStateVersion.current) {
+          void loadSharedState();
+        }
+      } catch (error) {
+        if (active) {
+          const message = error instanceof Error ? error.message : 'Could not check for shared updates.';
+          setSyncError(message);
+        }
+      } finally {
+        versionCheckInFlight = false;
       }
     };
 
@@ -325,7 +358,6 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const realtimeConnection = connectRealtime(realtimeUrl(), {
       onOpen: () => {
         realtimeConnected = true;
-        stopFallbackPolling();
         if (active) setSyncError(null);
         void loadSharedState();
       },
@@ -342,15 +374,17 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       },
       onError: () => {
         realtimeConnected = false;
-        startFallbackPolling();
+        if (active) setSyncError('Realtime stream interrupted. Checking for updates every 2 seconds.');
       },
     });
-    if (!realtimeConnection) startFallbackPolling();
+    if (!realtimeConnection) setSyncError('Realtime stream unavailable. Checking for updates every 2 seconds.');
+    versionTimer = setInterval(() => { void checkStateVersion(); }, 2000);
+    void checkStateVersion();
 
     return () => {
       active = false;
       realtimeConnection?.close();
-      if (refreshTimer) clearInterval(refreshTimer);
+      if (versionTimer) clearInterval(versionTimer);
     };
   }, [currentUser]);
 
@@ -481,7 +515,8 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const serializedState = JSON.stringify(state);
     if (serializedState === lastSyncedState.current) return;
 
-    const timeout = setTimeout(async () => {
+    stateSyncQueue.current = stateSyncQueue.current.catch(() => undefined).then(async () => {
+      if (serializedState === lastSyncedState.current) return;
       try {
         const response = await apiFetch('/api/state', {
           method: 'PUT',
@@ -500,15 +535,14 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           throw new Error(result.message || `Database sync failed (${response.status}).`);
         }
         lastSyncedState.current = serializedState;
+        if (result.revision !== undefined) serverStateVersion.current = Number(result.revision);
         setSyncError(null);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown database sync error.';
         console.error('[ClearPass shared state save failed]:', error);
         setSyncError(message);
       }
-    }, 250);
-
-    return () => clearTimeout(timeout);
+    });
   }, [currentUser, serverStateLoaded, users, students, personnel, clearanceForms, clearancePeriods, signatories, requirements, assignments, submissions, records, signatures, notifications]);
 
   // Derived active items
@@ -825,14 +859,14 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     reviewer_personnel_id: string;
   }) => {
     const now = new Date().toISOString();
-    let affectedStudentId = '';
-    let affectedReqId = '';
+    const affectedSubmission = submissions.find(item => item.submission_id === submission_id);
+    if (!affectedSubmission) return;
+    const affectedStudentId = affectedSubmission.student_id;
+    const affectedReqId = affectedSubmission.requirement_id;
 
     setSubmissions(prev =>
       prev.map(s => {
         if (s.submission_id === submission_id) {
-          affectedStudentId = s.student_id;
-          affectedReqId = s.requirement_id;
           return {
             ...s,
             submission_status: status,

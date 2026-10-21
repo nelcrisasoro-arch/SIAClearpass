@@ -8,7 +8,7 @@ export const pickProfileImage = async (): Promise<string | null> => {
     mediaTypes: ['images'],
     allowsEditing: true,
     aspect: [1, 1],
-    quality: 0.65,
+    quality: 0.4,
     base64: true,
   });
 

@@ -149,6 +149,14 @@ export const PersonnelSubmissionsScreenRN: React.FC<Props> = ({
     setSelectedStudent(null);
   };
 
+  const selectedStudentAssignments = selectedStudent
+    ? assignments.filter(assignment => assignment.student_id === selectedStudent.student_id && teacherReqIdSet.has(assignment.requirement_id))
+    : [];
+  const allSelectedRequirementsApproved = selectedStudentAssignments.length > 0 &&
+    selectedStudentAssignments.every(assignment => assignment.status === 'Approved');
+  const selectedStudentIsSigned = allSelectedRequirementsApproved && Boolean(teacherSig?.signature_data) &&
+    selectedStudentAssignments.every(assignment => assignment.signed_by_personnel_id === teacher.personnel_id && Boolean(assignment.signed_at));
+
   return (
     <View style={styles.container}>
       {/* Top Header */}
@@ -375,7 +383,7 @@ export const PersonnelSubmissionsScreenRN: React.FC<Props> = ({
                 </View>
 
                 {/* Sign or Revoke Clearance Section */}
-                {selectedStudent && assignments
+                {selectedStudent && selectedStudentIsSigned && assignments
                   .filter(a => a.student_id === selectedStudent.student_id)
                   .filter(a => {
                     const r = requirements.find(req => req.requirement_id === a.requirement_id);

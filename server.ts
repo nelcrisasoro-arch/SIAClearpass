@@ -212,8 +212,8 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
-app.use(express.json({ limit: '1mb' }));
-app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+app.use(express.json({ limit: '15mb' }));
+app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
 type AuthRequest = Request & { identity?: { userId: string; role: string } };
 const loginAttempts = new Map<string, { count: number; resetAt: number }>;
@@ -239,6 +239,7 @@ app.use('/api', (req: AuthRequest, res: Response, next) => {
 // Connects Android APKs and Admin Web for Instant Multi-Device Sync!
 // =========================================================================
 const sseClients = new Map<Response, { userId: string; role: string }>();
+let stateRevision = 0;
 
 const broadcastRealtimeEvent = (event: {
   type:
@@ -268,11 +269,14 @@ const broadcastRealtimeEvent = (event: {
 // SSE Stream Endpoint
 app.get('/api/realtime/stream', (req: Request, res: Response) => {
   res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
     'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
   });
 
+  res.flushHeaders();
+  res.write('retry: 2000\n\n');
   res.write(`data: ${JSON.stringify({ type: 'CONNECTED', message: 'Real-time sync established with SIA ClearPass Server' })}\n\n`);
   const identity = (req as AuthRequest).identity;
   if (!identity) return res.end();
@@ -342,6 +346,7 @@ app.get('/api/health', (req: Request, res: Response) => {
 });
 
 app.get('/api/state', async (_req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   try {
     const pool = await ensureStateTable();
     const [rows]: any = await pool.query(
@@ -359,11 +364,16 @@ app.get('/api/state', async (_req: Request, res: Response) => {
         requirements: [], assignments: [], submissions: [], records: [], signatures: [], notifications: [],
       };
     }
-    return res.json({ success: true, state, updated_at: rows[0]?.updated_at ?? null });
+    return res.json({ success: true, state, updated_at: rows[0]?.updated_at ?? null, revision: stateRevision });
   } catch (err: any) {
     console.error('[MySQL GET /api/state error]:', err?.message || err);
     return res.status(503).json({ success: false, message: 'Could not load shared application data from the database.' });
   }
+});
+
+app.get('/api/state/version', async (_req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  return res.json({ success: true, revision: stateRevision });
 });
 
 app.put('/api/state', async (req: AuthRequest, res: Response) => {
@@ -396,6 +406,7 @@ app.put('/api/state', async (req: AuthRequest, res: Response) => {
       [serializedState]
     );
 
+    stateRevision += 1;
     broadcastRealtimeEvent({
       type: 'STATE_UPDATED',
       data: { source },
@@ -403,7 +414,7 @@ app.put('/api/state', async (req: AuthRequest, res: Response) => {
     void enqueuePushNotifications(newNotifications).catch((error) => {
       console.error('[Push notification enqueue error]:', error instanceof Error ? error.message : 'unknown');
     });
-    return res.json({ success: true, updated_at: new Date().toISOString() });
+    return res.json({ success: true, updated_at: new Date().toISOString(), revision: stateRevision });
   } catch (err: any) {
     console.error('[MySQL PUT /api/state error]:', err?.message || err);
     return res.status(503).json({ success: false, message: 'Could not save application changes to the database.' });
