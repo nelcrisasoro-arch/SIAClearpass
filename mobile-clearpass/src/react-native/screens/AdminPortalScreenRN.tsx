@@ -103,7 +103,7 @@ const AdminPortalScreenRN: React.FC = () => {
     setAccountDraft({
       ...blankAccount('Student'), userId: profile.user_id, profileId: profile.student_id,
       firstName: profile.first_name, middleName: profile.middle_name || '', lastName: profile.last_name,
-      suffix: profile.suffix || '', identity: profile.student_number, email: user?.email || '',
+      suffix: profile.suffix || '', identity: profile.student_number, username: '', email: user?.email || '',
       schoolLevel: profile.school_level, gradeLevel: profile.grade_level, section: profile.section,
     });
   };
@@ -136,8 +136,11 @@ const AdminPortalScreenRN: React.FC = () => {
             middle_name: draft.middleName.trim(), last_name: draft.lastName.trim(), suffix: draft.suffix.trim(),
             school_level: draft.schoolLevel, grade_level: draft.gradeLevel, section: draft.section,
             school_year: students.find(item => item.student_id === draft.profileId)?.school_year || '2026-2027',
+            ...(draft.username.trim() ? { username: draft.username.trim() } : {}),
+            ...(draft.password ? { password: draft.password } : {}),
           });
         } else {
+          if (draft.password.length < 12) throw new Error('Set a temporary password with at least 12 characters.');
           const userId = `usr_${Date.now()}`;
           const studentId = `std_${Date.now()}`;
           const response = await apiFetch('/api/students', {
@@ -147,12 +150,12 @@ const AdminPortalScreenRN: React.FC = () => {
               middle_name: draft.middleName.trim(), last_name: draft.lastName.trim(), suffix: draft.suffix.trim(),
               school_level: draft.schoolLevel, grade_level: draft.gradeLevel, section: draft.section,
               school_year: '2026-2027', username: draft.username.trim() || draft.identity.trim(),
-              password: draft.identity.trim().slice(-4),
+              password: draft.password,
             }),
           });
           const data = await response.json();
           if (!response.ok || !data.success) throw new Error(data.error || data.message || `Server returned ${response.status}.`);
-          addUser({ name: data.user.name, email: data.user.email || '', role: 'Student',
+          addUser({ name: data.user.name, email: data.user.email || '', username: data.student.username, role: 'Student',
             studentNumber: data.student.student_number, schoolLevel: data.student.school_level,
             gradeLevel: data.student.grade_level, section: data.student.section,
             userId: data.user.user_id, studentId: data.student.student_id,
@@ -168,18 +171,19 @@ const AdminPortalScreenRN: React.FC = () => {
         });
       } else {
         if (draft.password.trim().length < 12) throw new Error('Set a temporary password with at least 12 characters.');
+        const personnelUsername = draft.username.trim() || `${draft.firstName.trim()}.${draft.lastName.trim()}`.toLowerCase().replace(/\s+/g, '');
         const response = await apiFetch('/api/personnel', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ user_id: `usr_${Date.now()}`, personnel_id: `per_${Date.now()}`,
             employee_number: draft.identity.trim(), full_name: fullName, office: draft.office,
             position: draft.position, assigned_subject: draft.subject, assigned_grade_level: draft.gradeLevel,
-            assigned_section: draft.section, username: draft.username.trim() || `${draft.firstName}.${draft.lastName}`.toLowerCase().replace(/\s+/g, ''),
+            assigned_section: draft.section, username: personnelUsername,
             password: draft.password.trim(), email: draft.email.trim(),
           }),
         });
         const data = await response.json();
         if (!response.ok || !data.success) throw new Error(data.error || data.message || `Server returned ${response.status}.`);
-        addUser({ name: data.user.name, email: data.user.email || '', role: 'Personnel',
+        addUser({ name: data.user.name, email: data.user.email || '', username: data.user.username || personnelUsername, role: 'Personnel',
           employeeNumber: data.personnel.employee_number, office: data.personnel.office,
           position: data.personnel.position, assignedSubject: data.personnel.assigned_subject,
           gradeLevel: data.personnel.assigned_grade_level, section: data.personnel.assigned_section,
@@ -364,7 +368,7 @@ const AdminPortalScreenRN: React.FC = () => {
 
       <Modal visible={!!accountDraft} transparent animationType="fade" onRequestClose={() => setAccountDraft(null)}>
         <View style={styles.modalBackdrop}><View style={[styles.modalCard, wide && styles.modalCardWide]}>
-          <View style={styles.modalHeader}><View><Text style={styles.panelTitle}>{accountDraft?.profileId ? 'Edit' : 'Add'} {accountDraft?.role} account</Text><Text style={styles.panelSub}>{accountDraft?.role === 'Student' ? 'Student uses LRN and the last four digits as initial password.' : 'Personnel accounts sign in using the username and temporary password.'}</Text></View><Pressable onPress={() => setAccountDraft(null)} style={styles.closeButton}><Text style={styles.closeText}>×</Text></Pressable></View>
+          <View style={styles.modalHeader}><View><Text style={styles.panelTitle}>{accountDraft?.profileId ? 'Edit' : 'Add'} {accountDraft?.role} account</Text><Text style={styles.panelSub}>{accountDraft?.role === 'Student' ? 'Create the student profile and set its login username and password.' : 'Create the personnel profile and set its login username and temporary password.'}</Text></View><Pressable onPress={() => setAccountDraft(null)} style={styles.closeButton}><Text style={styles.closeText}>×</Text></Pressable></View>
           <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.modalForm}>
             <View style={styles.twoColumns}><Field label="First name" value={accountDraft?.firstName || ''} onChangeText={value => setAccountDraft(prev => prev && ({ ...prev, firstName: value }))} placeholder="First name" /><Field label="Middle name" value={accountDraft?.middleName || ''} onChangeText={value => setAccountDraft(prev => prev && ({ ...prev, middleName: value }))} placeholder="Middle name" /></View>
             <View style={styles.twoColumns}><Field label="Last name" value={accountDraft?.lastName || ''} onChangeText={value => setAccountDraft(prev => prev && ({ ...prev, lastName: value }))} placeholder="Last name" /><Field label="Suffix" value={accountDraft?.suffix || ''} onChangeText={value => setAccountDraft(prev => prev && ({ ...prev, suffix: value }))} placeholder="Optional" /></View>
@@ -372,7 +376,8 @@ const AdminPortalScreenRN: React.FC = () => {
             {accountDraft?.role === 'Student' ? <>
               <Field label="School level" value={accountDraft.schoolLevel} onChangeText={value => setAccountDraft(prev => prev && ({ ...prev, schoolLevel: value }))} placeholder="Junior High School" />
               <View style={styles.twoColumns}><Field label="Grade level" value={accountDraft.gradeLevel} onChangeText={value => setAccountDraft(prev => prev && ({ ...prev, gradeLevel: value }))} placeholder="Grade 9" /><Field label="Section" value={accountDraft.section} onChangeText={value => setAccountDraft(prev => prev && ({ ...prev, section: value }))} placeholder="Rose" /></View>
-              {!accountDraft.profileId && <Field label="Username (defaults to LRN)" value={accountDraft.username} onChangeText={value => setAccountDraft(prev => prev && ({ ...prev, username: value }))} autoCapitalize="none" placeholder="Optional" />}
+              <Field label={accountDraft.profileId ? 'New username (optional)' : 'Username (defaults to LRN)'} value={accountDraft.username} onChangeText={value => setAccountDraft(prev => prev && ({ ...prev, username: value }))} autoCapitalize="none" placeholder={accountDraft.profileId ? 'Leave blank to keep current username' : 'name.surname'} />
+              <Field label={accountDraft.profileId ? 'New password (optional, 12+ characters)' : 'Initial password (12+ characters)'} value={accountDraft.password} onChangeText={value => setAccountDraft(prev => prev && ({ ...prev, password: value }))} secureTextEntry placeholder={accountDraft.profileId ? 'Leave blank to keep current password' : 'Set a temporary password'} />
             </> : <>
               <Field label="Office / department" value={accountDraft?.office || ''} onChangeText={value => setAccountDraft(prev => prev && ({ ...prev, office: value }))} placeholder="Office" />
               <Field label="Position" value={accountDraft?.position || ''} onChangeText={value => setAccountDraft(prev => prev && ({ ...prev, position: value }))} placeholder="Position" />

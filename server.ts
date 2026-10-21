@@ -554,7 +554,6 @@ app.get('/api/students', async (_req: Request, res: Response) => {
 
 // Create/Enroll Student in MySQL (Called by Administrator Web Portal)
 app.post('/api/students', async (req: Request, res: Response) => {
-
   const lrn = String(req.body.student_number || req.body.studentNumber || req.body.lrn || '').trim();
   const fName = String(req.body.first_name || req.body.firstName || '').trim();
   const mName = String(req.body.middle_name || req.body.middleName || '').trim();
@@ -564,14 +563,18 @@ app.post('/api/students', async (req: Request, res: Response) => {
   const rawGrade = String(req.body.grade_level || req.body.gradeLevel || 'Grade 9');
   const sect = String(req.body.section || 'Rose');
   const sYear = String(req.body.school_year || req.body.schoolYear || '2026-2027');
-  const uName = lrn;
+  const uName = typeof req.body.username === 'string' ? req.body.username.trim() : '';
+  const pass = typeof req.body.password === 'string' ? req.body.password : '';
   const uEmail = `${lrn}@students.sia.edu.ph`;
-  const pass = lrn.slice(-4);
   if (!/^\d{12}$/.test(lrn)) return res.status(400).json({ success: false, error: 'Enter a valid 12-digit LRN.' });
-  const passwordHash = await hashPassword(pass);
-
-  if (!fName || !lName || !lrn) {
+  if (!fName || !lName) {
     return res.status(400).json({ error: 'First name, last name, and LRN/Student number are required.' });
+  }
+  if (!/^[A-Za-z0-9._-]{3,100}$/.test(uName)) {
+    return res.status(400).json({ success: false, error: 'Choose a username with 3–100 letters, numbers, dots, underscores, or hyphens.' });
+  }
+  if (pass.length < 12 || pass.length > 128) {
+    return res.status(400).json({ success: false, error: 'Set a student password between 12 and 128 characters.' });
   }
 
   const userId = String(req.body.user_id || 'usr_' + Date.now());
@@ -588,9 +591,14 @@ app.post('/api/students', async (req: Request, res: Response) => {
     return res.status(503).json({ success: false, error: 'Database is offline. Student was not created.' });
   }
 
+  const passwordHash = await hashPassword(pass);
+  let connection: any;
+  let transactionStarted = false;
   try {
-    // Keep student credentials automatic: username is the LRN, password is its last 4 digits.
-    const [existingStudents]: any = await pool.query(
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    transactionStarted = true;
+    const [existingStudents]: any = await connection.query(
       `SELECT student_id, user_id FROM students WHERE student_number = ? LIMIT 1`,
       [lrn]
     );
@@ -599,29 +607,40 @@ app.post('/api/students', async (req: Request, res: Response) => {
       finalUserId = existingStudents[0].user_id;
     }
 
-    // 1. Reuse an existing student account, but never take over Personnel/Admin credentials.
-    const [existingUsers]: any = await pool.query(
-      `SELECT user_id, role, username FROM users
-       WHERE LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?) OR user_id = ?`,
-      [uName, uEmail, finalUserId]
+    const [credentialCollisions]: any = await connection.query(
+      `SELECT user_id FROM users
+       WHERE (LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?)) AND user_id <> ?`,
+      [uName, uEmail, existingStudents?.[0]?.user_id || '']
     );
+    if (credentialCollisions.length > 0) {
+      await connection.rollback();
+      return res.status(409).json({ success: false, error: 'That username is already used by another account.' });
+    }
 
-    if (existingUsers && existingUsers.length > 0) {
-      const existing = existingUsers.find((user: any) => user.user_id === finalUserId) || existingUsers[0];
-      if (existingUsers.some((user: any) => user.user_id !== existing.user_id)) {
-        return res.status(409).json({ success: false, error: 'The LRN is already assigned to another account.' });
+    if (existingStudents?.length) {
+      const [existingAccountRows]: any = await connection.query(
+        `SELECT user_id, role FROM users WHERE user_id = ? LIMIT 1`,
+        [finalUserId]
+      );
+      const existingAccount = existingAccountRows[0];
+      if (!existingAccount || existingAccount.role !== 'Student') {
+        await connection.rollback();
+        return res.status(409).json({ success: false, error: 'The LRN is already assigned to a non-student or unavailable account.' });
       }
-      if (existing.role !== 'Student') {
-        return res.status(409).json({ success: false, error: 'The LRN is already assigned to a non-student account.' });
-      }
-      finalUserId = existing.user_id;
-      await pool.query(
+      await connection.query(
         `UPDATE users SET username = ?, email = ?, name = ?, password_hash = ? WHERE user_id = ?`,
         [uName, uEmail, fullName, passwordHash, finalUserId]
       );
     } else {
-      // Brand new user
-      await pool.query(
+      const [existingUserIds]: any = await connection.query(
+        `SELECT user_id FROM users WHERE user_id = ? LIMIT 1`,
+        [finalUserId]
+      );
+      if (existingUserIds.length) {
+        await connection.rollback();
+        return res.status(409).json({ success: false, error: 'The requested account ID already exists.' });
+      }
+      await connection.query(
         `INSERT INTO users (user_id, username, email, password_hash, role, name)
          VALUES (?, ?, ?, ?, 'Student', ?)`,
         [finalUserId, uName, uEmail, passwordHash, fullName]
@@ -629,25 +648,33 @@ app.post('/api/students', async (req: Request, res: Response) => {
     }
 
     if (existingStudents && existingStudents.length > 0) {
-      await pool.query(
+      await connection.query(
         `UPDATE students 
            SET user_id = ?, first_name = ?, middle_name = ?, last_name = ?, suffix = ?, school_level = ?, grade_level = ?, section = ?, school_year = ?
            WHERE student_id = ?`,
         [finalUserId, fName, mName, lName, suf, sLevel, rawGrade, sect, sYear, finalStudentId]
       );
     } else {
-      await pool.query(
+      await connection.query(
         `INSERT INTO students (student_id, user_id, student_number, first_name, middle_name, last_name, suffix, school_level, grade_level, section, school_year)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [finalStudentId, finalUserId, lrn, fName, mName, lName, suf, sLevel, rawGrade, sect, sYear]
       );
     }
 
+    await connection.commit();
+    transactionStarted = false;
     mysqlInserted = true;
     console.log(`✅ [MySQL] Successfully inserted student "${fullName}" (LRN: ${lrn}, Username: "${uName}") into database!`);
   } catch (err: any) {
+    if (transactionStarted) await connection.rollback();
+    if (err?.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ success: false, error: 'The LRN or username is already assigned to another account.' });
+    }
     console.error('[MySQL] Student create failed:', err instanceof Error ? err.message : 'unknown error');
     return res.status(500).json({ error: 'Failed to create student account.' });
+  } finally {
+    connection?.release();
   }
 
   const createdStudent = {
@@ -670,6 +697,7 @@ app.post('/api/students', async (req: Request, res: Response) => {
   const createdUser = {
     user_id: finalUserId,
     auth_user_id: `auth_${finalUserId}`,
+    username: uName,
     name: fullName,
     email: uEmail,
     role: 'Student',
@@ -702,9 +730,17 @@ app.put('/api/students/:student_id', async (req: Request, res: Response) => {
   const gradeLevel = String(req.body.grade_level || '').trim();
   const section = String(req.body.section || '').trim();
   const schoolYear = String(req.body.school_year || '').trim();
+  const requestedUsername = typeof req.body.username === 'string' ? req.body.username.trim() : undefined;
+  const requestedPassword = typeof req.body.password === 'string' ? req.body.password : undefined;
 
-  if (!studentId || !studentNumber || !firstName || !lastName || !schoolLevel || !gradeLevel || !section || !schoolYear) {
+  if (!studentId || !/^\d{12}$/.test(studentNumber) || !firstName || !lastName || !schoolLevel || !gradeLevel || !section || !schoolYear) {
     return res.status(400).json({ success: false, message: 'All required student profile fields must be provided.' });
+  }
+  if (requestedUsername !== undefined && !/^[A-Za-z0-9._-]{3,100}$/.test(requestedUsername)) {
+    return res.status(400).json({ success: false, message: 'Choose a username with 3–100 letters, numbers, dots, underscores, or hyphens.' });
+  }
+  if (requestedPassword !== undefined && requestedPassword.length > 0 && (requestedPassword.length < 12 || requestedPassword.length > 128)) {
+    return res.status(400).json({ success: false, message: 'Set a student password between 12 and 128 characters.' });
   }
 
   const pool = getDbPool();
@@ -713,43 +749,87 @@ app.put('/api/students/:student_id', async (req: Request, res: Response) => {
   }
 
   try {
-    const [result]: any = await pool.query(
-      `UPDATE students s
-       JOIN users u ON u.user_id = s.user_id
-       SET s.student_number = ?, s.first_name = ?, s.middle_name = ?, s.last_name = ?,
-           s.suffix = ?, s.school_level = ?, s.grade_level = ?, s.section = ?,
-           s.school_year = ?, u.name = ?
-       WHERE s.student_id = ?`,
-      [
-        studentNumber,
-        firstName,
-        middleName,
-        lastName,
-        suffix,
-        schoolLevel,
-        gradeLevel,
-        section,
-        schoolYear,
-        `${firstName} ${middleName} ${lastName} ${suffix}`.trim(),
-        studentId,
-      ]
+    const connection = await pool.getConnection();
+    let transactionStarted = false;
+    try {
+    await connection.beginTransaction();
+    transactionStarted = true;
+    const [studentRows]: any = await connection.query(
+      `SELECT s.student_id, s.user_id, u.username, u.email
+       FROM students s JOIN users u ON u.user_id = s.user_id
+       WHERE s.student_id = ? LIMIT 1`,
+      [studentId]
     );
-    if (result.affectedRows === 0) {
-      const [existingRows]: any = await pool.query(
-        'SELECT student_id FROM students WHERE student_id = ? LIMIT 1',
-        [studentId]
-      );
-      if (!existingRows.length) {
-        return res.status(404).json({ success: false, message: 'Student account was not found.' });
-      }
+    if (!studentRows.length) {
+      await connection.rollback();
+      transactionStarted = false;
+      return res.status(404).json({ success: false, message: 'Student account was not found.' });
     }
 
-    const [rows]: any = await pool.query(
+    const existing = studentRows[0];
+    const username = requestedUsername || existing.username;
+    const email = `${studentNumber}@students.sia.edu.ph`;
+    const [duplicateStudents]: any = await connection.query(
+      'SELECT student_id FROM students WHERE student_number = ? AND student_id <> ? LIMIT 1',
+      [studentNumber, studentId]
+    );
+    if (duplicateStudents.length) {
+      await connection.rollback();
+      transactionStarted = false;
+      return res.status(409).json({ success: false, message: 'That LRN is already assigned to another student.' });
+    }
+    const [credentialCollisions]: any = await connection.query(
+      `SELECT user_id FROM users
+       WHERE (LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?)) AND user_id <> ?`,
+      [username, email, existing.user_id]
+    );
+    if (credentialCollisions.length) {
+      await connection.rollback();
+      transactionStarted = false;
+      return res.status(409).json({ success: false, message: 'That username or student email is already used by another account.' });
+    }
+
+    const accountName = `${firstName} ${middleName} ${lastName} ${suffix}`.trim();
+    const passwordHash = requestedPassword ? await hashPassword(requestedPassword) : undefined;
+    await connection.query(
+      `UPDATE students
+       SET student_number = ?, first_name = ?, middle_name = ?, last_name = ?,
+           suffix = ?, school_level = ?, grade_level = ?, section = ?, school_year = ?
+       WHERE student_id = ?`,
+      [studentNumber, firstName, middleName, lastName, suffix, schoolLevel, gradeLevel, section, schoolYear, studentId]
+    );
+    if (passwordHash) {
+      await connection.query(
+        'UPDATE users SET username = ?, email = ?, name = ?, password_hash = ? WHERE user_id = ?',
+        [username, email, accountName, passwordHash, existing.user_id]
+      );
+    } else {
+      await connection.query(
+        'UPDATE users SET username = ?, email = ?, name = ? WHERE user_id = ?',
+        [username, email, accountName, existing.user_id]
+      );
+    }
+    await connection.commit();
+    transactionStarted = false;
+    const [rows]: any = await connection.query(
       'SELECT * FROM students WHERE student_id = ? LIMIT 1',
       [studentId]
     );
-    return res.json({ success: true, student: rows[0] });
+    return res.json({
+      success: true,
+      student: { ...rows[0], username, email },
+      user: { user_id: existing.user_id, username, email, name: accountName },
+    });
+    } catch (err: any) {
+      if (transactionStarted) await connection.rollback();
+      throw err;
+    } finally {
+      connection.release();
+    }
   } catch (err: any) {
+    if (err?.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ success: false, message: 'The LRN or username is already assigned to another account.' });
+    }
     console.error('[MySQL PUT /api/students/:student_id error]:', err?.message || err);
     return res.status(500).json({ success: false, message: 'Failed to update student account.' });
   }
@@ -1010,6 +1090,7 @@ app.post('/api/personnel', async (req: Request, res: Response) => {
   const createdUser = {
     user_id: userId,
     auth_user_id: `auth_${userId}`,
+    username: uName,
     name: fName,
     email: uEmail,
     role: 'Personnel',

@@ -3,6 +3,7 @@ export type UserRole = 'Student' | 'Personnel' | 'Administrator';
 export interface User {
   user_id: string;
   auth_user_id: string;
+  username?: string;
   name: string;
   email: string;
   password?: string;
@@ -29,6 +30,11 @@ export interface StudentProfile {
   created_at: string;
   updated_at: string;
 }
+
+export type AdminStudentUpdate = Partial<StudentProfile> & {
+  username?: string;
+  password?: string;
+};
 
 export interface PersonnelProfile {
   personnel_id: string;
@@ -117,6 +123,8 @@ export interface StudentRequirementAssignment {
   period_id: string;
   status: AssignmentStatus;
   remarks?: string;
+  signed_by_personnel_id?: string;
+  signed_at?: string;
   assigned_by: string;
   assigned_at: string;
   updated_at: string;

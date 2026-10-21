@@ -11,13 +11,14 @@ import {
   School,
   Award
 } from 'lucide-react';
-import { StudentProfile, ClearanceRecord } from '../../types/clearpass';
+import { StudentProfile, ClearanceRecord, StudentRequirementAssignment } from '../../types/clearpass';
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
   student: StudentProfile;
   record?: ClearanceRecord;
+  previewMode?: boolean;
 }
 
 export const ClearanceCertificateModal: React.FC<Props> = ({
@@ -25,8 +26,9 @@ export const ClearanceCertificateModal: React.FC<Props> = ({
   onClose,
   student,
   record,
+  previewMode = false,
 }) => {
-  const { signatories, signatures, personnel, getStudentProgress, activePeriod } = useClearPass();
+  const { signatories, signatures, personnel, requirements, assignments, getStudentProgress, activePeriod } = useClearPass();
   const printRef = useRef<HTMLDivElement>(null);
   const [isCopied, setIsCopied] = useState(false);
 
@@ -55,7 +57,7 @@ export const ClearanceCertificateModal: React.FC<Props> = ({
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
           <div className="flex items-center gap-2">
             <Award className="w-5 h-5 text-blue-800" />
-            <h3 className="font-bold text-slate-800 text-base">Official Student Clearance Document</h3>
+            <h3 className="font-bold text-slate-800 text-base">{previewMode ? 'Example Clearance Form Preview' : 'Official Student Clearance Document'}</h3>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -76,6 +78,7 @@ export const ClearanceCertificateModal: React.FC<Props> = ({
 
         {/* Printable Certificate Body */}
         <div className="p-8 overflow-y-auto" ref={printRef}>
+          {previewMode && <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-center text-[11px] font-semibold text-blue-900">Example only · actual student signatures and statuses update here after personnel approval.</div>}
           <div className="border-4 border-double border-slate-800 p-8 rounded-lg bg-gradient-to-b from-amber-50/20 via-white to-amber-50/10 relative">
             {/* Watermark Seal */}
             <div className="absolute inset-0 flex items-center justify-center opacity-[0.03] pointer-events-none">
@@ -133,7 +136,7 @@ export const ClearanceCertificateModal: React.FC<Props> = ({
                 <span className="text-slate-500 block text-[10px] uppercase font-semibold">Clearance Status</span>
                 <span className={`inline-flex items-center gap-1 font-bold ${isFullyCleared ? 'text-emerald-700' : 'text-amber-700'}`}>
                   {isFullyCleared ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Clock className="w-3.5 h-3.5" />}
-                  {isFullyCleared ? 'CLEARED & APPROVED' : `${progress.percentage}% IN PROGRESS`}
+                  {isFullyCleared ? 'REQUIREMENTS APPROVED' : `${progress.percentage}% IN PROGRESS`}
                 </span>
               </div>
             </div>
@@ -160,7 +163,24 @@ export const ClearanceCertificateModal: React.FC<Props> = ({
                   {signatories.map((sig) => {
                     const signatoryPersonnel = personnel.find(p => p.personnel_id === sig.personnel_id);
                     const sigData = signatures.find(s => s.personnel_id === sig.personnel_id);
-                    const isSigned = isFullyCleared || sig.signatory_order > 1; // Show signatories
+                    const matchTerms = [
+                      signatoryPersonnel?.assigned_subject,
+                      signatoryPersonnel?.office,
+                      sig.department_code,
+                      sig.office_role,
+                    ].filter((value): value is string => Boolean(value)).map(normalizeClearanceKey).filter(Boolean);
+                    const requirementIds = new Set(requirements
+                      .filter(requirement => requirement.personnel_id === sig.personnel_id || [requirement.category, requirement.office]
+                        .map(normalizeClearanceKey)
+                        .some(value => matchTerms.some(term => value === term || value.includes(term) || term.includes(value))))
+                      .map(requirement => requirement.requirement_id));
+                    const signatoryAssignments = assignments.filter(assignment =>
+                      assignment.student_id === student.student_id && requirementIds.has(assignment.requirement_id)
+                    );
+                    const signatoryStatus = getSignatoryStatus(signatoryAssignments);
+                    const isSigned = signatoryAssignments.length > 0 && signatoryAssignments.every(assignment =>
+                      assignment.status === 'Approved' && assignment.signed_by_personnel_id === sig.personnel_id
+                    );
 
                     return (
                       <tr key={sig.signatory_id} className="hover:bg-slate-50">
@@ -171,26 +191,22 @@ export const ClearanceCertificateModal: React.FC<Props> = ({
                           {signatoryPersonnel?.full_name || sig.personnel_name}
                         </td>
                         <td className="py-2.5 px-3">
-                          <span className="inline-flex items-center gap-1 font-semibold text-emerald-700 text-[11px]">
-                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                            Approved
+                          <span className={`inline-flex items-center gap-1 font-semibold text-[11px] ${statusTextClass(signatoryStatus)}`}>
+                            {signatoryStatus === 'Approved' ? <CheckCircle2 className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
+                            {signatoryStatus}
                           </span>
                         </td>
                         <td className="py-2.5 px-3 text-center">
                           <div className="flex flex-col items-center justify-center">
-                            {sigData?.signature_data ? (
-                              <img
-                                src={sigData.signature_data}
-                                alt="Signature"
-                                className="h-7 max-w-[130px] object-contain"
-                              />
+                            {isSigned && sigData?.signature_data ? (
+                              <SignaturePreview signatureData={sigData.signature_data} signerName={signatoryPersonnel?.full_name || sig.personnel_name} />
+                            ) : isSigned ? (
+                              <span className="text-[10px] font-semibold text-emerald-700">Digital signature applied</span>
                             ) : (
-                              <div className="font-serif italic text-blue-900 text-sm font-bold border-b border-blue-900/40 px-2">
-                                {signatoryPersonnel?.full_name.split(' ')[0] || 'Signed'}
-                              </div>
+                              <span className="text-[10px] text-slate-400">Awaiting personnel signature</span>
                             )}
                             <span className="text-[9px] font-mono text-slate-400 mt-0.5">
-                              {sigData?.verification_code || `SIA-SIG-2026-000${sig.signatory_order}`}
+                              {isSigned ? sigData?.verification_code || signatoryAssignments.find(assignment => assignment.signed_at)?.signed_at || 'Digitally signed' : 'Not signed'}
                             </span>
                           </div>
                         </td>
@@ -266,4 +282,56 @@ export const ClearanceCertificateModal: React.FC<Props> = ({
       </div>
     </div>
   );
+};
+
+type SignaturePoint = { x: number; y: number };
+type SignatureStroke = SignaturePoint[];
+const SIGNATURE_PREFIX = 'sia-signature:';
+
+const normalizeClearanceKey = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+const getSignatoryStatus = (assignments: StudentRequirementAssignment[]) => {
+  if (!assignments.length) return 'Pending';
+  if (assignments.some(assignment => assignment.status === 'Rejected')) return 'Rejected';
+  if (assignments.some(assignment => assignment.status === 'With Remarks')) return 'With Remarks';
+  if (assignments.every(assignment => assignment.status === 'Approved')) return 'Approved';
+  if (assignments.some(assignment => assignment.status === 'Submitted')) return 'Submitted';
+  return 'Pending';
+};
+
+const statusTextClass = (status: string) => status === 'Approved'
+  ? 'text-emerald-700'
+  : status === 'Rejected' || status === 'With Remarks'
+    ? 'text-rose-700'
+    : 'text-amber-700';
+
+const SignaturePreview: React.FC<{ signatureData: string; signerName: string }> = ({ signatureData, signerName }) => {
+  if (signatureData.startsWith(SIGNATURE_PREFIX)) {
+    try {
+      const parsed: unknown = JSON.parse(signatureData.slice(SIGNATURE_PREFIX.length));
+      const strokes = Array.isArray(parsed) ? parsed as SignatureStroke[] : [];
+      if (strokes.length) {
+        return (
+          <svg viewBox="0 0 320 180" role="img" aria-label={`Digital signature by ${signerName}`} className="h-9 max-w-[140px]">
+            {strokes.map((stroke, index) => (
+              <polyline
+                key={index}
+                points={stroke.filter(point => Number.isFinite(point?.x) && Number.isFinite(point?.y)).map(point => `${point.x},${point.y}`).join(' ')}
+                fill="none"
+                stroke="#1e3a8a"
+                strokeWidth="5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            ))}
+          </svg>
+        );
+      }
+    } catch {
+      return <span className="text-[10px] text-emerald-700">Signature recorded</span>;
+    }
+    return <span className="text-[10px] text-emerald-700">Signature recorded</span>;
+  }
+
+  return <img src={signatureData} alt={`Digital signature by ${signerName}`} className="h-7 max-w-[130px] object-contain" />;
 };

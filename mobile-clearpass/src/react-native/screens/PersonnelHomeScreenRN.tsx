@@ -21,6 +21,7 @@ export const PersonnelHomeScreenRN: React.FC<Props> = ({ onNavigateTab }) => {
     currentPersonnel,
     students,
     activePeriod,
+    requirements,
     submissions,
     assignments,
     logout,
@@ -36,10 +37,27 @@ export const PersonnelHomeScreenRN: React.FC<Props> = ({ onNavigateTab }) => {
     s => s.grade_level === teacher.assigned_grade_level || teacher.assigned_grade_level === 'All Grades'
   );
 
-  const totalAssigned = 20; // SDD prototype specification: 20 Students
-  const pendingSubmissions = submissions.filter(s => s.submission_status === 'Pending').length;
-  const signedCount = 1;
-  const pendingCount = 19;
+  const totalAssigned = assignedStudents.length;
+  const teacherReqIds = new Set(requirements
+    .filter(requirement => requirement.personnel_id === teacher.personnel_id || requirement.category === teacher.assigned_subject)
+    .map(requirement => requirement.requirement_id));
+  const teacherSubmissions = submissions.filter(submission => teacherReqIds.has(submission.requirement_id));
+  const pendingSubmissions = teacherSubmissions.filter(submission => submission.submission_status === 'Pending').length;
+  const getReviewStatus = (studentId: string) => {
+    const statuses = [
+      ...assignments.filter(item => item.student_id === studentId && teacherReqIds.has(item.requirement_id)).map(item => item.status),
+      ...teacherSubmissions.filter(item => item.student_id === studentId).map(item => item.submission_status),
+    ];
+    if (statuses.some(status => status === 'Rejected' || status === 'With Remarks')) return 'Rejected';
+    if (statuses.some(status => status === 'Pending' || status === 'Submitted')) return 'Pending';
+    return statuses.length ? 'Approved' : 'Pending';
+  };
+  const pendingCount = assignedStudents.filter(student => getReviewStatus(student.student_id) === 'Pending').length;
+  const rejectedCount = assignedStudents.filter(student => getReviewStatus(student.student_id) === 'Rejected').length;
+  const approvedCount = assignedStudents.filter(student => getReviewStatus(student.student_id) === 'Approved').length;
+  const signedCount = new Set(assignments
+    .filter(item => item.signed_by_personnel_id === teacher.personnel_id && teacherReqIds.has(item.requirement_id))
+    .map(item => item.student_id)).size;
 
   return (
     <View style={styles.container}>
@@ -117,10 +135,10 @@ export const PersonnelHomeScreenRN: React.FC<Props> = ({ onNavigateTab }) => {
           </View>
 
           {/* Signed & Pending Columns (Figure 24) */}
-          <View style={styles.signedPendingRow}>
+          <View style={[styles.signedPendingRow, { flexWrap: 'wrap' }]}>
             {/* Signed Box */}
             <TouchableOpacity
-              style={styles.signedBox}
+              style={[styles.signedBox, { flexBasis: '47%', flexGrow: 1 }]}
               onPress={() => onNavigateTab('records')}
               activeOpacity={0.8}
             >
@@ -135,7 +153,7 @@ export const PersonnelHomeScreenRN: React.FC<Props> = ({ onNavigateTab }) => {
 
             {/* Pending Box */}
             <TouchableOpacity
-              style={styles.pendingBox}
+              style={[styles.pendingBox, { flexBasis: '47%', flexGrow: 1 }]}
               onPress={() => onNavigateTab('submissions')}
               activeOpacity={0.8}
             >
@@ -146,6 +164,24 @@ export const PersonnelHomeScreenRN: React.FC<Props> = ({ onNavigateTab }) => {
                 <Text style={styles.statNumber}>{pendingCount}</Text>
                 <Text style={styles.statLabel}>Pending</Text>
               </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.pendingBox, { flexBasis: '47%', flexGrow: 1, backgroundColor: '#fff1f2', borderColor: '#fecdd3' }]}
+              onPress={() => onNavigateTab('submissions')}
+              activeOpacity={0.8}
+            >
+              <View style={[styles.statIconCircleAmber, { backgroundColor: '#ffe4e6' }]}><Text style={[styles.statIconEmoji, { color: '#be123c' }]}>!</Text></View>
+              <View><Text style={[styles.statNumber, { color: '#be123c' }]}>{rejectedCount}</Text><Text style={[styles.statLabel, { color: '#9f1239' }]}>Rejected</Text></View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.signedBox, { flexBasis: '47%', flexGrow: 1 }]}
+              onPress={() => onNavigateTab('submissions')}
+              activeOpacity={0.8}
+            >
+              <View style={styles.statIconCircleGreen}><Text style={styles.statIconEmoji}>✓</Text></View>
+              <View><Text style={styles.statNumber}>{approvedCount}</Text><Text style={styles.statLabel}>Approved</Text></View>
             </TouchableOpacity>
           </View>
         </View>

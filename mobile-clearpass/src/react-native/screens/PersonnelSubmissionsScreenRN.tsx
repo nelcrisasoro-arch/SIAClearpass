@@ -17,6 +17,8 @@ interface Props {
   onNavigateSignature: () => void;
 }
 
+type ReviewFilter = 'All' | 'Pending' | 'Rejected' | 'Approved';
+
 export const PersonnelSubmissionsScreenRN: React.FC<Props> = ({
   onBack,
   onNavigateSignature,
@@ -37,9 +39,11 @@ export const PersonnelSubmissionsScreenRN: React.FC<Props> = ({
   const [selectedSubmission, setSelectedSubmission] = useState<RequirementSubmission | null>(null);
   const [remarksInput, setRemarksInput] = useState('');
   const [remarksModalVisible, setRemarksModalVisible] = useState(false);
+  const [reviewAction, setReviewAction] = useState<'remarks' | 'reject'>('remarks');
   const [revokeModalVisible, setRevokeModalVisible] = useState(false);
   const [revokeReason, setRevokeReason] = useState('Na-sipyat og pirma / Reverted for requirement verification');
   const [searchQuery, setSearchQuery] = useState('');
+  const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('All');
 
   const teacher = currentPersonnel;
   if (!teacher) return null;
@@ -50,24 +54,43 @@ export const PersonnelSubmissionsScreenRN: React.FC<Props> = ({
     s.student_number.includes(searchQuery)
   );
 
+  const teacherReqIds = requirements
+    .filter(r => r.category === teacher.assigned_subject || r.personnel_id === teacher.personnel_id)
+    .map(r => r.requirement_id);
+  const teacherReqIdSet = new Set(teacherReqIds);
+  const getReviewStatus = (studentId: string): Exclude<ReviewFilter, 'All'> => {
+    const statusValues = [
+      ...assignments
+        .filter(item => item.student_id === studentId && teacherReqIdSet.has(item.requirement_id))
+        .map(item => item.status),
+      ...submissions
+        .filter(item => item.student_id === studentId && teacherReqIdSet.has(item.requirement_id))
+        .map(item => item.submission_status),
+    ];
+    if (statusValues.some(status => status === 'Rejected' || status === 'With Remarks')) return 'Rejected';
+    if (statusValues.some(status => status === 'Pending' || status === 'Submitted')) return 'Pending';
+    return statusValues.length > 0 ? 'Approved' : 'Pending';
+  };
+  const visibleStudents = filteredStudents.filter(student =>
+    reviewFilter === 'All' || getReviewStatus(student.student_id) === reviewFilter
+  );
+  const reviewCounts: Record<ReviewFilter, number> = {
+    All: filteredStudents.length,
+    Pending: filteredStudents.filter(student => getReviewStatus(student.student_id) === 'Pending').length,
+    Rejected: filteredStudents.filter(student => getReviewStatus(student.student_id) === 'Rejected').length,
+    Approved: filteredStudents.filter(student => getReviewStatus(student.student_id) === 'Approved').length,
+  };
+
   const teacherSig = signatures.find(s => s.personnel_id === teacher.personnel_id);
 
   const handleOpenStudent = (std: StudentProfile) => {
     setSelectedStudent(std);
     // Find latest submission for this student under this teacher
-    const teacherReqIds = requirements
-      .filter(r => r.category === teacher.assigned_subject || r.personnel_id === teacher.personnel_id)
-      .map(r => r.requirement_id);
-
-    const sub = submissions.find(
-      s => s.student_id === std.student_id && teacherReqIds.includes(s.requirement_id)
-    );
+    const sub = submissions
+      .filter(s => s.student_id === std.student_id && teacherReqIdSet.has(s.requirement_id))
+      .sort((left, right) => new Date(right.submitted_at).getTime() - new Date(left.submitted_at).getTime())[0];
     setSelectedSubmission(sub || null);
-    if (sub?.remarks) {
-      setRemarksInput(sub.remarks);
-    } else {
-      setRemarksInput('Please attach photo of working model circuit diagram.');
-    }
+    setRemarksInput(sub?.remarks || '');
   };
 
   const handleApprove = () => {
@@ -83,10 +106,15 @@ export const PersonnelSubmissionsScreenRN: React.FC<Props> = ({
 
   const handleSendRemarks = () => {
     if (!selectedSubmission || !teacher) return;
+    const remarks = remarksInput.trim();
+    if (!remarks) {
+      Alert.alert('Add a reason', 'Enter feedback before sending remarks or rejecting the submission.');
+      return;
+    }
     reviewSubmission({
       submission_id: selectedSubmission.submission_id,
-      status: 'With Remarks',
-      remarks: remarksInput,
+      status: reviewAction === 'reject' ? 'Rejected' : 'With Remarks',
+      remarks,
       reviewer_personnel_id: teacher.personnel_id,
     });
     setRemarksModalVisible(false);
@@ -95,6 +123,17 @@ export const PersonnelSubmissionsScreenRN: React.FC<Props> = ({
 
   const handleSignStudentClearance = () => {
     if (!selectedStudent || !teacher) return;
+    if (!teacherSig?.signature_data) {
+      Alert.alert('Save your signature first', 'Register your digital signature before applying it to a student clearance form.');
+      return;
+    }
+    const studentTeacherAssignments = assignments.filter(assignment =>
+      assignment.student_id === selectedStudent.student_id && teacherReqIdSet.has(assignment.requirement_id)
+    );
+    if (!studentTeacherAssignments.length || studentTeacherAssignments.some(assignment => assignment.status !== 'Approved')) {
+      Alert.alert('Requirements are not approved', 'Approve all of your assigned clearance items before signing this student form.');
+      return;
+    }
     signClearanceForStudent(teacher.personnel_id, selectedStudent.student_id);
     setSelectedStudent(null);
   };
@@ -151,6 +190,20 @@ export const PersonnelSubmissionsScreenRN: React.FC<Props> = ({
           </View>
         </View>
 
+        <View style={[styles.filterRow, { marginTop: 4 }]}>
+          {(['All', 'Pending', 'Rejected', 'Approved'] as ReviewFilter[]).map(filter => (
+            <TouchableOpacity
+              key={filter}
+              onPress={() => setReviewFilter(filter)}
+              style={[styles.filterChip, reviewFilter === filter && { backgroundColor: '#1e3a8a', borderColor: '#1e3a8a' }]}
+            >
+              <Text style={[styles.filterChipValue, reviewFilter === filter && { color: '#fff' }]}>
+                {filter} ({reviewCounts[filter]})
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
         {/* Students Table (Figure 26) */}
         <View style={styles.tableCard}>
           <View style={styles.tableHeaderRow}>
@@ -160,15 +213,8 @@ export const PersonnelSubmissionsScreenRN: React.FC<Props> = ({
             </Text>
           </View>
 
-          {filteredStudents.map((std, idx) => {
-            const stdAsgs = assignments.filter(a => a.student_id === std.student_id);
-            const teacherReqIds = requirements
-              .filter(r => r.category === teacher.assigned_subject || r.personnel_id === teacher.personnel_id)
-              .map(r => r.requirement_id);
-            const teacherAsgs = stdAsgs.filter(a => teacherReqIds.includes(a.requirement_id));
-
-            const isSigned = teacherAsgs.length > 0 && teacherAsgs.every(a => a.status === 'Approved');
-            const hasRemarks = teacherAsgs.some(a => a.status === 'With Remarks');
+          {visibleStudents.map((std, idx) => {
+            const status = getReviewStatus(std.student_id);
 
             return (
               <TouchableOpacity
@@ -188,9 +234,9 @@ export const PersonnelSubmissionsScreenRN: React.FC<Props> = ({
                   <View
                     style={[
                       styles.statusPill,
-                      isSigned
+                      status === 'Approved'
                         ? styles.statusPillSigned
-                        : hasRemarks
+                        : status === 'Rejected'
                         ? styles.statusPillRemarks
                         : styles.statusPillPending,
                     ]}
@@ -198,14 +244,14 @@ export const PersonnelSubmissionsScreenRN: React.FC<Props> = ({
                     <Text
                       style={[
                         styles.statusPillText,
-                        isSigned
+                        status === 'Approved'
                           ? styles.statusPillTextSigned
-                          : hasRemarks
+                          : status === 'Rejected'
                           ? styles.statusPillTextRemarks
                           : styles.statusPillTextPending,
                       ]}
                     >
-                      {isSigned ? 'Signed / Cleared' : hasRemarks ? 'With Remarks' : 'Pending'}
+                      {status}
                     </Text>
                   </View>
                 </View>
@@ -303,8 +349,24 @@ export const PersonnelSubmissionsScreenRN: React.FC<Props> = ({
                     </TouchableOpacity>
 
                     <TouchableOpacity
+                      style={[styles.remarksButton, { backgroundColor: '#fee2e2' }]}
+                      onPress={() => {
+                        setReviewAction('reject');
+                        setRemarksInput('');
+                        setRemarksModalVisible(true);
+                      }}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[styles.remarksButtonText, { color: '#b91c1c' }]}>Reject</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
                       style={styles.remarksButton}
-                      onPress={() => setRemarksModalVisible(true)}
+                      onPress={() => {
+                        setReviewAction('remarks');
+                        setRemarksInput(selectedSubmission?.remarks || '');
+                        setRemarksModalVisible(true);
+                      }}
                       activeOpacity={0.8}
                     >
                       <Text style={styles.remarksButtonText}>💬 Send Remarks</Text>
@@ -423,9 +485,11 @@ export const PersonnelSubmissionsScreenRN: React.FC<Props> = ({
       >
         <View style={styles.modalOverlay}>
           <View style={styles.remarksDialog}>
-            <Text style={styles.remarksDialogTitle}>Provide Feedback / Remarks</Text>
+            <Text style={styles.remarksDialogTitle}>{reviewAction === 'reject' ? 'Reject Submission' : 'Provide Feedback / Remarks'}</Text>
             <Text style={styles.remarksDialogSubtitle}>
-              The student will receive an immediate notification with these instructions:
+              {reviewAction === 'reject'
+                ? 'Give the student a reason so they know what to correct before resubmitting.'
+                : 'The student will receive an immediate notification with these instructions:'}
             </Text>
 
             <TextInput
@@ -448,7 +512,7 @@ export const PersonnelSubmissionsScreenRN: React.FC<Props> = ({
                 style={styles.dialogConfirmBtn}
                 onPress={handleSendRemarks}
               >
-                <Text style={styles.dialogConfirmBtnText}>Send to Student</Text>
+                <Text style={styles.dialogConfirmBtnText}>{reviewAction === 'reject' ? 'Reject submission' : 'Send to Student'}</Text>
               </TouchableOpacity>
             </View>
           </View>

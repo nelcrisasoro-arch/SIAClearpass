@@ -73,6 +73,7 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
   const [addFormModalOpen, setAddFormModalOpen] = useState(false);
   const [addPeriodModalOpen, setAddPeriodModalOpen] = useState(false);
   const [viewCertStudent, setViewCertStudent] = useState<StudentProfile | null>(null);
+  const [certificatePreviewMode, setCertificatePreviewMode] = useState(false);
   const [creationSuccessNotice, setCreationSuccessNotice] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
@@ -104,6 +105,8 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
   const [sLastName, setSLastName] = useState('');
   const [sSuffix, setSSuffix] = useState('');
   const [sLrn, setSLrn] = useState('');
+  const [sUsername, setSUsername] = useState('');
+  const [sPassword, setSPassword] = useState('');
   const [sSchoolLevel, setSSchoolLevel] = useState('Junior High School');
   const [sGradeLevel, setSGradeLevel] = useState('Grade 9');
   const [sSection, setSSection] = useState('Rose');
@@ -220,6 +223,7 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
       addUser({
         name: data.user.name,
         email: data.user.email,
+        username: data.user.username || finalUsername,
         role: 'Personnel',
         employeeNumber: data.personnel.employee_number,
         office: data.personnel.office,
@@ -286,6 +290,8 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
     setSLastName(profile.last_name);
     setSSuffix(profile.suffix || '');
     setSLrn(profile.student_number);
+    setSUsername('');
+    setSPassword('');
     setSSchoolLevel(profile.school_level);
     setSGradeLevel(profile.grade_level);
     setSSection(profile.section);
@@ -306,6 +312,11 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
     }
 
     if (editingStudentId) {
+      if (sPassword && sPassword.length < 12) {
+        setDeleteError('Student passwords must be at least 12 characters.');
+        return;
+      }
+
       try {
         await updateAdminStudent(editingStudentId, {
           student_number: lrnNo,
@@ -317,8 +328,11 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
           grade_level: sGradeLevel,
           section: sSection,
           school_year: students.find(student => student.student_id === editingStudentId)?.school_year || '2026-2027',
+          ...(sUsername.trim() ? { username: sUsername.trim() } : {}),
+          ...(sPassword ? { password: sPassword } : {}),
         });
-        setCreationSuccessNotice(`Student "${sFirstName.trim()} ${sLastName.trim()}" was updated.`);
+        const credentialsUpdated = Boolean(sUsername.trim() || sPassword);
+        setCreationSuccessNotice(`Student "${sFirstName.trim()} ${sLastName.trim()}" was updated${credentialsUpdated ? ' and login credentials were saved' : ''}.`);
         setAddStudentModalOpen(false);
         setEditingStudentId(null);
         setSFirstName('');
@@ -326,6 +340,8 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
         setSLastName('');
         setSSuffix('');
         setSLrn('');
+        setSUsername('');
+        setSPassword('');
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error.';
         console.error('[Student update failed]:', error);
@@ -335,7 +351,15 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
     }
 
     const fullName = `${sLastName}, ${sFirstName} ${sMiddleName} ${sSuffix}`.trim();
-    const studentPass = lrnNo.slice(-4);
+    const studentUsername = sUsername.trim();
+    if (!studentUsername) {
+      setDeleteError('Set a username for the student.');
+      return;
+    }
+    if (sPassword.length < 12) {
+      setDeleteError('Set a temporary password with at least 12 characters.');
+      return;
+    }
 
     const userId = `usr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const studentId = `std_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -355,8 +379,8 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
           grade_level: sGradeLevel,
           section: sSection,
           school_year: '2026-2027',
-          username: lrnNo,
-          password: studentPass,
+          username: studentUsername,
+          password: sPassword,
         }),
       });
       const data = await response.json();
@@ -367,6 +391,7 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
       addUser({
         name: data.user.name,
         email: data.user.email,
+        username: data.student.username,
         role: 'Student',
         studentNumber: data.student.student_number,
         schoolLevel: data.student.school_level,
@@ -380,7 +405,7 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
         userId: data.user.user_id,
         studentId: data.student.student_id,
       });
-      setCreationSuccessNotice(`✓ Student "${fullName}" (LRN: ${lrnNo}) saved to the database.`);
+      setCreationSuccessNotice(`✓ Student "${fullName}" saved. Mobile username: "${data.student.username}".`);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error.';
       console.error('[Student creation failed]:', error);
@@ -392,7 +417,10 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
     setSFirstName('');
     setSMiddleName('');
     setSLastName('');
+    setSSuffix('');
     setSLrn('');
+    setSUsername('');
+    setSPassword('');
   };
 
   const handleCreateForm = (e: React.FormEvent) => {
@@ -407,6 +435,27 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
       created_by: 'usr_admin',
     });
     setAddFormModalOpen(false);
+  };
+
+  const openExampleFormPreview = () => {
+    const now = new Date().toISOString();
+    setCertificatePreviewMode(true);
+    setViewCertStudent({
+      student_id: 'example_clearance_student',
+      user_id: 'example_clearance_user',
+      student_number: '117947100018',
+      first_name: 'Juan',
+      middle_name: 'Santos',
+      last_name: 'Dela Cruz',
+      suffix: '',
+      grade_level: 'Grade 9',
+      section: 'Rose',
+      school_level: formLevel,
+      school_year: formSy,
+      status: 1,
+      created_at: now,
+      updated_at: now,
+    });
   };
 
   const handleCreatePeriod = (e: React.FormEvent) => {
@@ -691,6 +740,8 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
                       setSLastName('');
                       setSSuffix('');
                       setSLrn('');
+                      setSUsername('');
+                      setSPassword('');
                       setSSchoolLevel('Junior High School');
                       setSGradeLevel('Grade 9');
                       setSSection('Rose');
@@ -1248,11 +1299,17 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
               </div>
 
               <div className="rounded-xl border border-dashed border-blue-300 bg-blue-50/60 p-5 text-center">
-                <h3 className="text-sm font-bold text-blue-950">Official Clearance Format</h3>
+                <h3 className="text-sm font-bold text-blue-950">Example Clearance Form Template</h3>
                 <p className="mx-auto mt-1 max-w-xl text-xs leading-relaxed text-blue-800">
-                  Wala pa na-upload ang inyong official clearance form. I-send ang inyong format (photo, PDF, o Word file) aron mao gyud ang sundon sa preview ug clearance form sa system.
+                  Preview how student details, each office's pending or approved status, and the actual saved digital signature appear on the clearance form. Use a student's record below to check their live signed form.
                 </p>
-                <span className="mt-3 inline-flex rounded-full border border-blue-200 bg-white px-2.5 py-1 text-[10px] font-bold text-blue-900">Awaiting official template</span>
+                <button
+                  type="button"
+                  onClick={openExampleFormPreview}
+                  className="mt-3 inline-flex rounded-lg bg-blue-900 px-4 py-2 text-[11px] font-bold text-white hover:bg-blue-950"
+                >
+                  Preview Example Form
+                </button>
               </div>
 
               {/* Authorized Department Head Signatories Management (SDD Table 8.0) */}
@@ -1687,13 +1744,15 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
                 </h3>
                 <p className="text-[11px] text-slate-500">
                   {editingStudentId
-                    ? 'Update the student profile. Login credentials will remain unchanged.'
+                    ? 'Update the profile and optionally reset the mobile login credentials.'
                     : 'Admin registers student with LRN, class section, and clearance assignment'}
                 </p>
               </div>
               <button onClick={() => {
                 setAddStudentModalOpen(false);
                 setEditingStudentId(null);
+                setSUsername('');
+                setSPassword('');
               }}>
                 <X className="w-5 h-5 text-slate-400" />
               </button>
@@ -1755,13 +1814,19 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
                   pattern="[0-9]{12}"
                   placeholder="e.g. 117947100018 (12-digit DepEd LRN)"
                   value={sLrn}
-                  onChange={(e) => setSLrn(e.target.value.replace(/\D/g, '').slice(0, 12))}
+                  onChange={(e) => {
+                    const nextLrn = e.target.value.replace(/\D/g, '').slice(0, 12);
+                    setSLrn(nextLrn);
+                    if (!editingStudentId) {
+                      setSUsername(current => !current || current === sLrn ? nextLrn : current);
+                    }
+                  }}
                   className="w-full p-2 bg-slate-50 border border-slate-300 rounded-lg font-mono"
                 />
                 <span className="text-[10px] text-blue-600 font-medium mt-0.5 block">
                   {editingStudentId
-                    ? 'Existing student login credentials stay unchanged when you update the LRN.'
-                    : 'The student signs in with the LRN as username and its last 4 digits as the initial password.'}
+                    ? 'The LRN identifies the student. Leave credential fields blank to keep the current login.'
+                    : 'The student can use the LRN or the username below to sign in.'}
                 </span>
               </div>
 
@@ -1824,11 +1889,49 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
                 </div>
               </div>
 
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-1">
-                <span className="font-bold text-slate-800 block text-[11px] uppercase tracking-wider">
-                  Student Mobile Login
-                </span>
-                <p className="text-[11px] text-slate-600">Username is the 12-digit LRN. The initial password is the last 4 digits of that LRN; the administrator cannot set a separate student password here.</p>
+              <div className="grid grid-cols-2 gap-2 rounded-xl border border-blue-200 bg-blue-50 p-3">
+                <div>
+                  <label className="mb-1 block font-semibold text-slate-700">
+                    {editingStudentId ? 'New Username (optional)' : 'Student Username *'}
+                  </label>
+                  <input
+                    type="text"
+                    required={!editingStudentId}
+                    minLength={3}
+                    maxLength={100}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    placeholder={editingStudentId
+                      ? `Current: ${users.find(user => user.user_id === students.find(student => student.student_id === editingStudentId)?.user_id)?.username || students.find(student => student.student_id === editingStudentId)?.student_number || 'unchanged'}`
+                      : 'e.g. juan.delacruz'}
+                    value={sUsername}
+                    onChange={(e) => setSUsername(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 bg-white p-2"
+                  />
+                  <p className="mt-1 text-[10px] text-slate-600">Students may also sign in with their LRN.</p>
+                </div>
+                <div>
+                  <label className="mb-1 block font-semibold text-slate-700">
+                    {editingStudentId ? 'New Password (optional)' : 'Initial Password *'}
+                  </label>
+                  <input
+                    type="password"
+                    required={!editingStudentId}
+                    minLength={12}
+                    maxLength={128}
+                    autoComplete="new-password"
+                    placeholder={editingStudentId ? 'Leave blank to keep current password' : 'At least 12 characters'}
+                    value={sPassword}
+                    onChange={(e) => setSPassword(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 bg-white p-2"
+                  />
+                  <p className="mt-1 text-[10px] text-slate-600">Use 12 or more characters.</p>
+                </div>
+                {editingStudentId && (
+                  <p className="col-span-2 text-[10px] text-slate-600">
+                    Leave both fields blank to keep the existing credentials. A changed password is stored securely as a hash.
+                  </p>
+                )}
               </div>
 
               <div className="flex gap-2 mt-2">
@@ -1839,7 +1942,10 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
                     setSFirstName('Juan');
                     setSMiddleName('Santos');
                     setSLastName('DelaCruz');
-                    setSLrn(`11794710${rnd}`);
+                    const sampleLrn = `11794710${rnd}`;
+                    setSLrn(sampleLrn);
+                    setSUsername(sampleLrn);
+                    setSPassword('SampleStudent!2026');
                   }}
                   className="w-1/3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold text-xs cursor-pointer border border-slate-300 transition-colors"
                 >
@@ -1979,8 +2085,12 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
       {viewCertStudent && (
         <ClearanceCertificateModal
           isOpen={!!viewCertStudent}
-          onClose={() => setViewCertStudent(null)}
+          onClose={() => {
+            setViewCertStudent(null);
+            setCertificatePreviewMode(false);
+          }}
           student={viewCertStudent}
+          previewMode={certificatePreviewMode}
         />
       )}
     </div>

@@ -64,7 +64,7 @@ export const LoginScreenRN: React.FC<Props> = ({ onSuccess, allowedRoles = ['Stu
         <Text style={styles.securityTitle}>🔒 Official School Credentials</Text>
         <Text style={styles.securityText}>
           Accounts are provisioned by the School Administration.
-          Students: Password is the <Text style={{ fontWeight: 'bold' }}>last 4 digits of your LRN</Text>.
+          Students: Sign in with your LRN or administrator-set username and password.
         </Text>
       </View>
 

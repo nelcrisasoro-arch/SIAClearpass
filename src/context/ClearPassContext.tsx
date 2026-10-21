@@ -3,6 +3,7 @@ import {
   User,
   UserRole,
   StudentProfile,
+  AdminStudentUpdate,
   PersonnelProfile,
   ClearanceForm,
   ClearancePeriod,
@@ -100,6 +101,7 @@ interface ClearPassContextType {
     name: string;
     email: string;
     role: UserRole;
+    username?: string;
     studentNumber?: string;
     employeeNumber?: string;
     schoolLevel?: string;
@@ -118,7 +120,7 @@ interface ClearPassContextType {
     schoolYear?: string;
   }) => void;
   deleteUser: (userId: string) => Promise<void>;
-  updateAdminStudent: (student_id: string, updates: Partial<StudentProfile>) => Promise<void>;
+  updateAdminStudent: (student_id: string, updates: AdminStudentUpdate) => Promise<void>;
   updateAdminPersonnel: (personnel_id: string, updates: Partial<PersonnelProfile>) => Promise<void>;
   updateStudentProfile: (student_id: string, updates: Partial<StudentProfile>) => void;
   updatePersonnelProfile: (personnel_id: string, updates: Partial<PersonnelProfile>) => void;
@@ -497,7 +499,7 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const pass = passwordInput ? passwordInput.trim() : '';
 
     // 1. Check if user is a Student
-    // User condition: password is the LAST 4 DIGITS of their LRN!
+    // Keep the local preview login compatible with accounts created before the database login flow.
     const matchedStudent = students.find(s => {
       const u = users.find(user => user.user_id === s.user_id);
       const studentUsername = `${s.first_name}.${s.last_name}`.toLowerCase();
@@ -523,7 +525,7 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (!isValidPassword) {
         return {
           success: false,
-          message: `Incorrect password! For students, your password is the LAST 4 DIGITS of your LRN (${last4Lrn}).`,
+          message: 'Incorrect password. Use the password provided by the school administrator or ask them to reset it.',
         };
 
       }
@@ -816,6 +818,9 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             ...a,
             status: mappedAssignmentStatus,
             remarks: remarks || a.remarks,
+            ...(status === 'Rejected' || status === 'With Remarks'
+              ? { signed_by_personnel_id: undefined, signed_at: undefined }
+              : {}),
             updated_at: now,
           };
         }
@@ -860,10 +865,12 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const notif: NotificationItem = {
         notification_id: 'notif_' + Date.now(),
         user_id: studentUser.user_id,
-        title: isApproved ? 'Task Approved' : 'Task Remarks',
+        title: isApproved ? 'Task Approved' : status === 'Rejected' ? 'Task Rejected' : 'Task Remarks',
         message: isApproved
           ? `Your submission for "${req?.requirement_name}" was approved! Progress is now ${newPercent}%.`
-          : `Feedback received on "${req?.requirement_name}": ${remarks}`,
+          : status === 'Rejected'
+            ? `Your submission for "${req?.requirement_name}" was rejected: ${remarks}`
+            : `Feedback received on "${req?.requirement_name}": ${remarks}`,
         notification_type: isApproved ? 'Approval' : 'Remark',
         related_record_id: submission_id,
         is_read: false,
@@ -910,13 +917,22 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   // Sign clearance for a student
   const signClearanceForStudent = (personnel_id: string, student_id: string) => {
     // Approve all requirements under this personnel for this student
-    const teacherReqs = requirements.filter(r => r.personnel_id === personnel_id).map(r => r.requirement_id);
+    const signer = personnel.find(profile => profile.personnel_id === personnel_id);
+    const teacherReqs = requirements
+      .filter(r => r.personnel_id === personnel_id || r.category === signer?.assigned_subject)
+      .map(r => r.requirement_id);
     const now = new Date().toISOString();
 
     setAssignments(prev =>
       prev.map(a => {
         if (a.student_id === student_id && teacherReqs.includes(a.requirement_id)) {
-          return { ...a, status: 'Approved', updated_at: now };
+          return {
+            ...a,
+            status: 'Approved',
+            signed_by_personnel_id: personnel_id,
+            signed_at: now,
+            updated_at: now,
+          };
         }
         return a;
       })
@@ -993,6 +1009,8 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             ...a,
             status: 'With Remarks',
             remarks: reason,
+            signed_by_personnel_id: undefined,
+            signed_at: undefined,
             updated_at: now,
           };
         }
@@ -1017,7 +1035,13 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     // Recalculate student clearance progress
     const updatedAssignments = assignments.map(a => {
       if (a.student_id === student_id && teacherReqs.includes(a.requirement_id)) {
-        return { ...a, status: 'With Remarks' as const, remarks: reason };
+        return {
+          ...a,
+          status: 'With Remarks' as const,
+          remarks: reason,
+          signed_by_personnel_id: undefined,
+          signed_at: undefined,
+        };
       }
       return a;
     });
@@ -1158,6 +1182,7 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     name: string;
     email: string;
     role: UserRole;
+    username?: string;
     studentNumber?: string;
     employeeNumber?: string;
     schoolLevel?: string;
@@ -1180,6 +1205,7 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const newUser: User = {
       user_id: userId,
       auth_user_id: 'auth_' + Date.now(),
+      username: params.username,
       name: params.name,
       email: params.email,
       role: params.role,
@@ -1294,7 +1320,7 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setSignatures(prev => prev.filter(signature => !deletedPersonnelIds.includes(signature.personnel_id)));
   };
 
-  const updateAdminStudent = async (student_id: string, updates: Partial<StudentProfile>) => {
+  const updateAdminStudent = async (student_id: string, updates: AdminStudentUpdate) => {
       const response = await apiFetch(`/api/students/${encodeURIComponent(student_id)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -1306,13 +1332,20 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
 
     const updatedStudent = result.student as StudentProfile;
+    const updatedAccount = result.user as { username?: string; email?: string; name?: string } | undefined;
     const fullName = `${updatedStudent.first_name} ${updatedStudent.middle_name} ${updatedStudent.last_name} ${updatedStudent.suffix || ''}`.trim();
     setStudents(prev => prev.map(student => student.student_id === student_id
       ? { ...student, ...updatedStudent, updated_at: new Date().toISOString() }
       : student
     ));
     setUsers(prev => prev.map(user => user.user_id === updatedStudent.user_id
-      ? { ...user, name: fullName, updated_at: new Date().toISOString() }
+      ? {
+        ...user,
+        username: updatedAccount?.username ?? updates.username ?? user.username,
+        email: updatedAccount?.email ?? user.email,
+        name: updatedAccount?.name ?? fullName,
+        updated_at: new Date().toISOString(),
+      }
       : user
     ));
   };
