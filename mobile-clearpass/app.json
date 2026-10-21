@@ -19,7 +19,7 @@
     "icon": "./assets/sia-clearpass-icon.jpg",
     "android": {
       "package": "com.sia.clearpass",
-      "versionCode": 2,
+      "versionCode": 3,
       "adaptiveIcon": {
         "foregroundImage": "./assets/sia-clearpass-adaptive-foreground.jpg",
         "backgroundColor": "#1e3a8a"

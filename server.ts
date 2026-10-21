@@ -531,6 +531,12 @@ app.post('/api/auth/logout', (req: Request, res: Response) => {
 // 3. STUDENTS CRUD (INSERT / SELECT / DELETE IN MYSQL)
 // =========================================================================
 
+const toStudentUsernamePart = (value: string) => value
+  .normalize('NFKD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase()
+  .replace(/[^a-z0-9]/g, '');
+
 // Get All Students from MySQL
 app.get('/api/students', async (_req: Request, res: Response) => {
   const pool = getDbPool();
@@ -563,8 +569,9 @@ app.post('/api/students', async (req: Request, res: Response) => {
   const rawGrade = String(req.body.grade_level || req.body.gradeLevel || 'Grade 9');
   const sect = String(req.body.section || 'Rose');
   const sYear = String(req.body.school_year || req.body.schoolYear || '2026-2027');
-  const uName = typeof req.body.username === 'string' ? req.body.username.trim() : '';
-  const pass = typeof req.body.password === 'string' ? req.body.password : '';
+  const requestedUsername = typeof req.body.username === 'string' ? req.body.username.trim() : '';
+  const uName = requestedUsername || `${toStudentUsernamePart(fName)}.${toStudentUsernamePart(lName)}`;
+  const pass = lrn.slice(-4);
   const uEmail = `${lrn}@students.sia.edu.ph`;
   if (!/^\d{12}$/.test(lrn)) return res.status(400).json({ success: false, error: 'Enter a valid 12-digit LRN.' });
   if (!fName || !lName) {
@@ -573,8 +580,8 @@ app.post('/api/students', async (req: Request, res: Response) => {
   if (!/^[A-Za-z0-9._-]{3,100}$/.test(uName)) {
     return res.status(400).json({ success: false, error: 'Choose a username with 3–100 letters, numbers, dots, underscores, or hyphens.' });
   }
-  if (pass.length < 12 || pass.length > 128) {
-    return res.status(400).json({ success: false, error: 'Set a student password between 12 and 128 characters.' });
+  if (!/^\d{4}$/.test(pass)) {
+    return res.status(400).json({ success: false, error: 'The student password must match the last 4 digits of the LRN.' });
   }
 
   const userId = String(req.body.user_id || 'usr_' + Date.now());

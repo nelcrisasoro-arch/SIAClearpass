@@ -29,6 +29,15 @@ import { ClearanceCertificateModal } from '../common/ClearanceCertificateModal';
 import { apiFetch } from '../../utils/api';
 import { SchoolLogo } from '../common/SchoolLogo';
 
+const normalizeUsernamePart = (value: string) => value
+  .normalize('NFKD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase()
+  .replace(/[^a-z0-9]/g, '');
+
+const defaultStudentUsername = (firstName: string, lastName: string) =>
+  [normalizeUsernamePart(firstName), normalizeUsernamePart(lastName)].filter(Boolean).join('.');
+
 export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackToPortal }) => {
   const {
     users,
@@ -351,15 +360,12 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
     }
 
     const fullName = `${sLastName}, ${sFirstName} ${sMiddleName} ${sSuffix}`.trim();
-    const studentUsername = sUsername.trim();
-    if (!studentUsername) {
-      setDeleteError('Set a username for the student.');
+    const studentUsername = sUsername.trim() || defaultStudentUsername(sFirstName, sLastName);
+    if (!/^[A-Za-z0-9._-]{3,100}$/.test(studentUsername)) {
+      setDeleteError('Enter a valid username or check the student name.');
       return;
     }
-    if (sPassword.length < 12) {
-      setDeleteError('Set a temporary password with at least 12 characters.');
-      return;
-    }
+    const studentPassword = lrnNo.slice(-4);
 
     const userId = `usr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const studentId = `std_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -380,7 +386,7 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
           section: sSection,
           school_year: '2026-2027',
           username: studentUsername,
-          password: sPassword,
+          password: studentPassword,
         }),
       });
       const data = await response.json();
@@ -405,7 +411,7 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
         userId: data.user.user_id,
         studentId: data.student.student_id,
       });
-      setCreationSuccessNotice(`✓ Student "${fullName}" saved. Mobile username: "${data.student.username}".`);
+      setCreationSuccessNotice(`✓ Student "${fullName}" saved. Mobile login: "${data.student.username}" / "${studentPassword}" (last 4 LRN digits).`);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error.';
       console.error('[Student creation failed]:', error);
@@ -1817,16 +1823,13 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
                   onChange={(e) => {
                     const nextLrn = e.target.value.replace(/\D/g, '').slice(0, 12);
                     setSLrn(nextLrn);
-                    if (!editingStudentId) {
-                      setSUsername(current => !current || current === sLrn ? nextLrn : current);
-                    }
                   }}
                   className="w-full p-2 bg-slate-50 border border-slate-300 rounded-lg font-mono"
                 />
                 <span className="text-[10px] text-blue-600 font-medium mt-0.5 block">
                   {editingStudentId
                     ? 'The LRN identifies the student. Leave credential fields blank to keep the current login.'
-                    : 'The student can use the LRN or the username below to sign in.'}
+                    : 'Student signs in with the LRN or the generated username and the last 4 LRN digits as password.'}
                 </span>
               </div>
 
@@ -1892,7 +1895,7 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
               <div className="grid grid-cols-2 gap-2 rounded-xl border border-blue-200 bg-blue-50 p-3">
                 <div>
                   <label className="mb-1 block font-semibold text-slate-700">
-                    {editingStudentId ? 'New Username (optional)' : 'Student Username *'}
+                    {editingStudentId ? 'New Username (optional)' : 'Student Username (auto-generated)'}
                   </label>
                   <input
                     type="text"
@@ -1903,29 +1906,38 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
                     autoCorrect="off"
                     placeholder={editingStudentId
                       ? `Current: ${users.find(user => user.user_id === students.find(student => student.student_id === editingStudentId)?.user_id)?.username || students.find(student => student.student_id === editingStudentId)?.student_number || 'unchanged'}`
-                      : 'e.g. juan.delacruz'}
-                    value={sUsername}
+                      : 'e.g. nelcris.asoro'}
+                    value={editingStudentId ? sUsername : sUsername || defaultStudentUsername(sFirstName, sLastName)}
                     onChange={(e) => setSUsername(e.target.value)}
                     className="w-full rounded-lg border border-slate-300 bg-white p-2"
                   />
-                  <p className="mt-1 text-[10px] text-slate-600">Students may also sign in with their LRN.</p>
+                  <p className="mt-1 text-[10px] text-slate-600">Generated from first.last; change it if it is already taken.</p>
                 </div>
                 <div>
                   <label className="mb-1 block font-semibold text-slate-700">
-                    {editingStudentId ? 'New Password (optional)' : 'Initial Password *'}
+                    {editingStudentId ? 'New Password (optional)' : 'Initial Password (last 4 LRN digits)'}
                   </label>
-                  <input
-                    type="password"
-                    required={!editingStudentId}
-                    minLength={12}
-                    maxLength={128}
-                    autoComplete="new-password"
-                    placeholder={editingStudentId ? 'Leave blank to keep current password' : 'At least 12 characters'}
-                    value={sPassword}
-                    onChange={(e) => setSPassword(e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 bg-white p-2"
-                  />
-                  <p className="mt-1 text-[10px] text-slate-600">Use 12 or more characters.</p>
+                  {editingStudentId ? (
+                    <input
+                      type="password"
+                      minLength={12}
+                      maxLength={128}
+                      autoComplete="new-password"
+                      placeholder="Leave blank to keep current password"
+                      value={sPassword}
+                      onChange={(e) => setSPassword(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 bg-white p-2"
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      readOnly
+                      value={sLrn.length === 12 ? sLrn.slice(-4) : ''}
+                      placeholder="Enter the 12-digit LRN first"
+                      className="w-full rounded-lg border border-slate-300 bg-slate-100 p-2 font-mono"
+                    />
+                  )}
+                  <p className="mt-1 text-[10px] text-slate-600">{editingStudentId ? 'Leave blank to keep the current password.' : 'Automatically set to the last 4 digits of the LRN.'}</p>
                 </div>
                 {editingStudentId && (
                   <p className="col-span-2 text-[10px] text-slate-600">
@@ -1944,8 +1956,8 @@ export const AdminPortal: React.FC<{ onBackToPortal?: () => void }> = ({ onBackT
                     setSLastName('DelaCruz');
                     const sampleLrn = `11794710${rnd}`;
                     setSLrn(sampleLrn);
-                    setSUsername(sampleLrn);
-                    setSPassword('SampleStudent!2026');
+                    setSUsername('juan.delacruz');
+                    setSPassword(sampleLrn.slice(-4));
                   }}
                   className="w-1/3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold text-xs cursor-pointer border border-slate-300 transition-colors"
                 >
