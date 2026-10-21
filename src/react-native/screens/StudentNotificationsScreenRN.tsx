@@ -13,10 +13,10 @@ interface Props {
 }
 
 export const StudentNotificationsScreenRN: React.FC<Props> = ({ onBack }) => {
-  const { notifications, markNotificationRead, markAllNotificationsRead } = useClearPass();
+  const { currentStudent, notifications, markNotificationRead, markAllNotificationsRead } = useClearPass();
 
   const studentNotifs = notifications.filter(
-    n => n.user_id === 'usr_student_joseph' || !n.user_id
+    n => n.user_id === currentStudent?.user_id || !n.user_id
   );
 
   return (

@@ -13,6 +13,8 @@ import { StudentProfile } from '../../types/clearpass';
 import schoolLogoUrl from '../../assets/images/sia_school_logo.jpg';
 import { studentAvatarSource } from '../utils/avatarSource';
 
+const normalizeSignatoryTerm = (value?: string) => (value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
 interface Props {
   onNavigateTab: (tab: 'home' | 'requirements' | 'records' | 'notifications' | 'profile') => void;
   onOpenCertificate: (student: StudentProfile) => void;
@@ -27,6 +29,8 @@ export const StudentHomeScreenRN: React.FC<Props> = ({
     signatories,
     signatures,
     personnel,
+    requirements,
+    assignments,
     activePeriod,
     notifications,
     getStudentProgress,
@@ -39,7 +43,7 @@ export const StudentHomeScreenRN: React.FC<Props> = ({
   if (!student) return null;
 
   const progress = getStudentProgress(student.student_id);
-  const unreadNotifs = notifications.filter(n => !n.is_read && n.user_id === 'usr_student_joseph').length;
+  const unreadNotifs = notifications.filter(n => !n.is_read && n.user_id === student.user_id).length;
 
   return (
     <View style={styles.container}>
@@ -156,7 +160,23 @@ export const StudentHomeScreenRN: React.FC<Props> = ({
 
             {signatories.map((sig, index) => {
               const pers = personnel.find(p => p.personnel_id === sig.personnel_id);
-              const isSigned = progress.percentage === 100 || sig.signatory_order > 1;
+              const matchTerms = [pers?.assigned_subject, pers?.office, sig.department_code, sig.office_role]
+                .map(normalizeSignatoryTerm)
+                .filter(Boolean);
+              const requirementIds = new Set(requirements
+                .filter(requirement => requirement.personnel_id === sig.personnel_id || [requirement.category, requirement.office]
+                  .map(normalizeSignatoryTerm)
+                  .some(value => matchTerms.some(term => value === term || value.includes(term) || term.includes(value))))
+                .map(requirement => requirement.requirement_id));
+              const signatoryAssignments = assignments.filter(assignment =>
+                assignment.student_id === student.student_id && requirementIds.has(assignment.requirement_id)
+              );
+              const isSigned = signatoryAssignments.length > 0 && signatoryAssignments.every(assignment =>
+                assignment.status === 'Approved' && assignment.signed_by_personnel_id === sig.personnel_id
+              );
+              const savedSignature = signatures.find(signature =>
+                signature.personnel_id === sig.personnel_id && signature.signature_status === 'active'
+              );
 
               return (
                 <View key={sig.signatory_id} style={[styles.tableRow, index % 2 === 1 && styles.tableRowAlt]}>
@@ -165,7 +185,7 @@ export const StudentHomeScreenRN: React.FC<Props> = ({
                       {pers?.full_name || sig.personnel_name}
                     </Text>
                     <Text style={styles.signatoryOfficeText} numberOfLines={1}>
-                      {pers?.office || 'Department'}
+                      {isSigned ? `Signed · ${savedSignature?.verification_code || 'Verified'}` : pers?.office || 'Department'}
                     </Text>
                   </View>
 
