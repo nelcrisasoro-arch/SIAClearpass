@@ -30,6 +30,7 @@ import {
   INITIAL_NOTIFICATIONS,
 } from '../data/initialData';
 import { apiFetch, apiUrl, realtimeUrl } from '../utils/api';
+import { connectRealtime } from '../utils/realtime';
 import { appStorage } from '../utils/storage';
 
 export type DeviceMode = 'mobile' | 'responsive' | 'admin_web';
@@ -292,10 +293,8 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     void loadSharedState();
     let refreshTimer: ReturnType<typeof setInterval> | undefined;
-    let eventSource: EventSource | undefined;
-    if (typeof EventSource !== 'undefined') {
-      eventSource = new EventSource(realtimeUrl());
-      eventSource.onmessage = (message) => {
+    const realtimeConnection = connectRealtime(realtimeUrl(), {
+      onMessage: (message) => {
         try {
           const event = JSON.parse(message.data);
           if (event.type === 'STATE_UPDATED' && event.data?.source !== syncClientId.current) {
@@ -304,11 +303,12 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         } catch (error) {
           console.error('[ClearPass realtime event parse failed]:', error);
         }
-      };
-      eventSource.onerror = () => {
+      },
+      onError: () => {
         if (active) setSyncError('Real-time connection interrupted. Reconnecting…');
-      };
-    } else {
+      },
+    });
+    if (!realtimeConnection) {
       refreshTimer = setInterval(() => {
         void loadSharedState();
       }, 3000);
@@ -316,7 +316,7 @@ export const ClearPassProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     return () => {
       active = false;
-      eventSource?.close();
+      realtimeConnection?.close();
       if (refreshTimer) clearInterval(refreshTimer);
     };
   }, [currentUser]);
